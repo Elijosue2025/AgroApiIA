@@ -1,0 +1,6 @@
+@AgroGuiaWEBApi_HostAddress = http://localhost:5261
+
+GET {{AgroGuiaWEBApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

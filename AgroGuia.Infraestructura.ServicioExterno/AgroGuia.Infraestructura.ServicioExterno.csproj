@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
+    <PackageReference Include="OllamaSharp" Version="5.4.25" />
+    <PackageReference Include="PdfPig" Version="0.1.14" />
+    <PackageReference Include="PDFsharp" Version="6.2.4" />
+    <PackageReference Include="VectorSharp.Embedding.NomicEmbed" Version="1.0.3" />
+    <ProjectReference Include="..\AgroGuia.Aplicacion.DTO\AgroGuia.Aplicacion.DTO.csproj" />
+    <ProjectReference Include="..\AgroGuia.Dominio.Modelo\AgroGuia.Dominio.Modelo.csproj" />
+    <ProjectReference Include="..\AgroGuia.Dominio.Servicio\AgroGuia.Dominio.Servicio.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Primitives" Version="10.0.8" />
+    <PackageReference Include="OpenAI" Version="2.10.0" />
+  </ItemGroup>
+
+</Project>

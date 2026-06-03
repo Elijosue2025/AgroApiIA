@@ -1,0 +1,82 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36623.8
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "1.Interfaz", "1.Interfaz", "{4682C0B4-ABD5-4D05-9CDB-392872A5DA9D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "2.Aplicacion", "2.Aplicacion", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "3.Dominio", "3.Dominio", "{739B8C3B-07EE-48A6-B7C6-4102CE0579A1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "4.Infraestructura", "4.Infraestructura", "{86A56190-852C-4E4E-81DB-E6CF6C243A05}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgroGuia.Aplicacion", "AgroGuia.Aplicacion\AgroGuia.Aplicacion.csproj", "{4647D65A-E10E-4252-B516-45F8E0A08085}"
+	ProjectSection(ProjectDependencies) = postProject
+		{E0BC41E1-3040-447C-A1F3-44D45C2509C5} = {E0BC41E1-3040-447C-A1F3-44D45C2509C5}
+		{E6D49D7A-EB2F-4482-8622-D60EB8F5FFBE} = {E6D49D7A-EB2F-4482-8622-D60EB8F5FFBE}
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgroGuia.Aplicacion.DTO", "AgroGuia.Aplicacion.DTO\AgroGuia.Aplicacion.DTO.csproj", "{056850A1-4A57-4C42-9451-425CB81F922E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgroGuia.Dominio.Modelo", "AgroGuia.Dominio.Modelo\AgroGuia.Dominio.Modelo.csproj", "{E0BC41E1-3040-447C-A1F3-44D45C2509C5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgroGuia.Dominio.Servicio", "AgroGuia.Dominio.Servicio\AgroGuia.Dominio.Servicio.csproj", "{E6D49D7A-EB2F-4482-8622-D60EB8F5FFBE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgroGuiaWEBApi", "AgroGuiaWEBApi\AgroGuiaWEBApi.csproj", "{26263B8D-FCCE-4EB1-BA86-9F040DCD56E3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgroGuia.Infraestructura.AccesoDatos", "AgroGuia.Infraestructura.AccesoDatos\AgroGuia.Infraestructura.AccesoDatos.csproj", "{E669E271-A448-4C05-9AAA-1AC0E6E7E12F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgroGuia.Infraestructura.ServicioExterno", "AgroGuia.Infraestructura.ServicioExterno\AgroGuia.Infraestructura.ServicioExterno.csproj", "{716115E8-98A0-4742-A5F8-64E9C3CB4C68}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4647D65A-E10E-4252-B516-45F8E0A08085}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4647D65A-E10E-4252-B516-45F8E0A08085}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4647D65A-E10E-4252-B516-45F8E0A08085}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4647D65A-E10E-4252-B516-45F8E0A08085}.Release|Any CPU.Build.0 = Release|Any CPU
+		{056850A1-4A57-4C42-9451-425CB81F922E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{056850A1-4A57-4C42-9451-425CB81F922E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{056850A1-4A57-4C42-9451-425CB81F922E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{056850A1-4A57-4C42-9451-425CB81F922E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E0BC41E1-3040-447C-A1F3-44D45C2509C5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E0BC41E1-3040-447C-A1F3-44D45C2509C5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E0BC41E1-3040-447C-A1F3-44D45C2509C5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E0BC41E1-3040-447C-A1F3-44D45C2509C5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E6D49D7A-EB2F-4482-8622-D60EB8F5FFBE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E6D49D7A-EB2F-4482-8622-D60EB8F5FFBE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E6D49D7A-EB2F-4482-8622-D60EB8F5FFBE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E6D49D7A-EB2F-4482-8622-D60EB8F5FFBE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{26263B8D-FCCE-4EB1-BA86-9F040DCD56E3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{26263B8D-FCCE-4EB1-BA86-9F040DCD56E3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{26263B8D-FCCE-4EB1-BA86-9F040DCD56E3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{26263B8D-FCCE-4EB1-BA86-9F040DCD56E3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E669E271-A448-4C05-9AAA-1AC0E6E7E12F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E669E271-A448-4C05-9AAA-1AC0E6E7E12F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E669E271-A448-4C05-9AAA-1AC0E6E7E12F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E669E271-A448-4C05-9AAA-1AC0E6E7E12F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{716115E8-98A0-4742-A5F8-64E9C3CB4C68}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{716115E8-98A0-4742-A5F8-64E9C3CB4C68}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{716115E8-98A0-4742-A5F8-64E9C3CB4C68}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{716115E8-98A0-4742-A5F8-64E9C3CB4C68}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{4647D65A-E10E-4252-B516-45F8E0A08085} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{056850A1-4A57-4C42-9451-425CB81F922E} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{E0BC41E1-3040-447C-A1F3-44D45C2509C5} = {739B8C3B-07EE-48A6-B7C6-4102CE0579A1}
+		{E6D49D7A-EB2F-4482-8622-D60EB8F5FFBE} = {739B8C3B-07EE-48A6-B7C6-4102CE0579A1}
+		{26263B8D-FCCE-4EB1-BA86-9F040DCD56E3} = {4682C0B4-ABD5-4D05-9CDB-392872A5DA9D}
+		{E669E271-A448-4C05-9AAA-1AC0E6E7E12F} = {86A56190-852C-4E4E-81DB-E6CF6C243A05}
+		{716115E8-98A0-4742-A5F8-64E9C3CB4C68} = {86A56190-852C-4E4E-81DB-E6CF6C243A05}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {7A6C99B6-399C-405C-A68D-7BCC369A9A47}
+	EndGlobalSection
+EndGlobal

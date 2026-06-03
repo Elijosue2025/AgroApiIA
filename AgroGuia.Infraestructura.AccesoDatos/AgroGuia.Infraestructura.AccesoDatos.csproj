@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.26" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.26">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Primitives" Version="10.0.8" />
+    <PackageReference Include="VectorSharp.Embedding.NomicEmbed" Version="1.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgroGuia.Aplicacion.DTO\AgroGuia.Aplicacion.DTO.csproj" />
+    <ProjectReference Include="..\AgroGuia.Aplicacion\AgroGuia.Aplicacion.csproj" />
+    <ProjectReference Include="..\AgroGuia.Dominio.Modelo\AgroGuia.Dominio.Modelo.csproj" />
+    <ProjectReference Include="..\AgroGuia.Dominio.Servicio\AgroGuia.Dominio.Servicio.csproj" />
+  </ItemGroup>
+
+</Project>
