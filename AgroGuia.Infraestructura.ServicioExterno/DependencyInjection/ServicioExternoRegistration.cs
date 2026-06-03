@@ -1,4 +1,4 @@
-﻿// Archivo: AgroGuia.Infraestructura/ServicioExterno/DependencyInjection/ServicioExternoRegistration.cs
+﻿
 using AgroGuia.Infraestructura.ServicioExterno.DocumentLoader;
 using AgroGuia.Infraestructura.ServicioExterno.Embeddings;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
@@ -18,6 +18,13 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DependencyInjection
         {
             services.Configure<OpenAIConfig>(configuration.GetSection("OpenAI"));
             services.Configure<DocumentosConfig>(configuration.GetSection("Documentos"));
+
+            // ==================== CACHÉ ====================
+            services.AddMemoryCache(options =>
+            {
+                // Límite de 50MB para el caché de embeddings
+                options.SizeLimit = 50_000;
+            });
 
             // ==================== PRINCIPAL: OLLAMA ====================
             services.AddScoped<IOpenAIService, OllamaChatService>();

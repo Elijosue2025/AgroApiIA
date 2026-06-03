@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgroGuia.Infraestructura.Ac
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgroGuia.Infraestructura.ServicioExterno", "AgroGuia.Infraestructura.ServicioExterno\AgroGuia.Infraestructura.ServicioExterno.csproj", "{716115E8-98A0-4742-A5F8-64E9C3CB4C68}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "AgroGuia.MAUI", "AgroGuia.MAUI", "{76DF9145-54EF-4FF2-849F-2E512618C840}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU

@@ -72,7 +72,7 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
             { "temperatura", "Clima y Altitud" }
         };
 
-        // ✅ Palabras vacías en español para no contaminar palabras clave
+        // ✅ Palabras vacías en español
         private static readonly HashSet<string> _stopWords = new()
         {
             "para", "como", "este", "esta", "estos", "estas", "desde",
@@ -128,18 +128,15 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
 
             foreach (var page in document.GetPages())
             {
-                // ✅ Limpieza básica del texto extraído del PDF
-                string textoPagina = LimpiarTextoPdf(page.Text);
-                if (!string.IsNullOrWhiteSpace(textoPagina))
-                    contenidoCompleto.AppendLine(textoPagina);
+                contenidoCompleto.AppendLine(page.Text);
             }
 
             string textoCompleto = contenidoCompleto.ToString().Trim();
             if (string.IsNullOrWhiteSpace(textoCompleto)) return;
 
-            // ✅ Chunks más inteligentes: corte por párrafos, no por caracteres ciegos
-            var chunks = DividirEnChunksPorParrafos(textoCompleto, 1000, 200);
+            var chunks = DividirEnChunks(textoCompleto, 1100);
 
+            // ✅ Detectar cultivo y tema una sola vez por documento
             string cultivo = DetectarCultivo(titulo);
             string tema = DetectarTema(titulo);
 
@@ -152,24 +149,31 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
                 var embeddingResult = await _embeddingService.GenerarEmbeddingAsync(chunk);
 
                 if (!embeddingResult.Exito)
-                    Console.WriteLine($"⚠️ Embedding falló: {embeddingResult.ErrorMensaje}");
+                {
+                    Console.WriteLine($"❌ [EMBEDDING FALLÓ] Error: {embeddingResult.ErrorMensaje}");
+                    Console.WriteLine($"   Chunk preview: {chunk.Substring(0, Math.Min(80, chunk.Length))}...");
+                }
                 else
-                    Console.WriteLine($"✅ Embedding OK: {embeddingResult.Vector.Count} dims");
+                {
+                    Console.WriteLine($"✅ [EMBEDDING OK] Vector de {embeddingResult.Vector.Count} dimensiones");
+                }
+
+                // ✅ Calcular una sola vez para VectorEmbedding
+                string? vectorJson = embeddingResult.Exito
+                    ? JsonSerializer.Serialize(embeddingResult.Vector)
+                    : null;
 
                 var nuevoChunk = new EmbeddingChunks
                 {
-                    Titulo = titulo.Length > 250 ? titulo[..250] : titulo,
+                    Titulo = titulo.Length > 250 ? titulo.Substring(0, 250) : titulo,
                     Contenido = chunk,
                     Fuente = "Manual Técnico",
                     Cultivo = cultivo,
                     Tema = tema,
-                    // Palabras clave agrícolas mejoradas
                     PalabrasClave = GenerarPalabrasClave(chunk, cultivo, tema),
                     FechaCarga = DateTime.UtcNow,
                     Activo = true,
-                    VectorEmbedding = embeddingResult.Exito
-                        ? JsonSerializer.Serialize(embeddingResult.Vector)
-                        : null,
+                    VectorEmbedding = vectorJson,
                     Metadata = JsonSerializer.Serialize(new
                     {
                         archivoOriginal = titulo,
@@ -185,86 +189,22 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
             }
         }
 
-        // ✅ NUEVO: Divide por párrafos respetando el contexto semántico
-        private List<string> DividirEnChunksPorParrafos(
-            string texto,
-            int maxCaracteres,
-            int overlap) // overlap = solapamiento para no perder contexto entre chunks
-        {
-            var chunks = new List<string>();
-
-            // Separar por párrafos (doble salto de línea)
-            var parrafos = texto
-                .Split(new[] { "\n\n", "\r\n\r\n" }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(p => p.Trim())
-                .Where(p => p.Length > 30) // ignorar párrafos muy cortos
-                .ToList();
-
-            var chunkActual = new StringBuilder();
-
-            foreach (var parrafo in parrafos)
-            {
-                // Si agregar este párrafo excede el límite, guardar chunk actual
-                if (chunkActual.Length + parrafo.Length > maxCaracteres && chunkActual.Length > 0)
-                {
-                    chunks.Add(chunkActual.ToString().Trim());
-
-                    // Overlap: conservar últimas palabras del chunk anterior
-                    string textoActual = chunkActual.ToString();
-                    string solapamiento = textoActual.Length > overlap
-                        ? textoActual[^overlap..]
-                        : textoActual;
-
-                    chunkActual.Clear();
-                    chunkActual.AppendLine(solapamiento);
-                }
-
-                chunkActual.AppendLine(parrafo);
-            }
-
-            // Agregar el último chunk
-            if (chunkActual.Length > 0)
-                chunks.Add(chunkActual.ToString().Trim());
-
-            // Fallback: si no hubo párrafos, dividir por caracteres
-            if (chunks.Count == 0)
-                return DividirEnChunks(texto, maxCaracteres);
-
-            return chunks;
-        }
-
-        // Fallback original por si acaso
         private List<string> DividirEnChunks(string texto, int maxCaracteres)
         {
             var chunks = new List<string>();
             int posicion = 0;
+
             while (posicion < texto.Length)
             {
                 int longitud = Math.Min(maxCaracteres, texto.Length - posicion);
-                chunks.Add(texto.Substring(posicion, longitud).Trim());
+                string chunk = texto.Substring(posicion, longitud);
+                chunks.Add(chunk.Trim());
                 posicion += longitud;
             }
             return chunks;
         }
 
-        // ✅ NUEVO: Limpieza de texto extraído de PDFs
-        private string LimpiarTextoPdf(string texto)
-        {
-            if (string.IsNullOrWhiteSpace(texto)) return string.Empty;
-
-            return texto
-                // Eliminar múltiples espacios en blanco
-                .Replace("  ", " ")
-                // Eliminar caracteres de control extraños de PDFs
-                .Replace("\f", "\n")
-                .Replace("\r\n", "\n")
-                // Normalizar guiones largos comunes en PDFs
-                .Replace("–", "-")
-                .Replace("—", "-")
-                .Trim();
-        }
-
-        // ✅ MEJORADO: Detecta cultivos con diccionario ampliado
+        // ✅ Detecta cultivos con diccionario ampliado
         private string DetectarCultivo(string titulo)
         {
             string t = titulo.ToLower();
@@ -273,7 +213,7 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
             return "General";
         }
 
-        // ✅ MEJORADO: Detecta temas con diccionario ampliado
+        // ✅ Detecta temas con diccionario ampliado
         private string DetectarTema(string titulo)
         {
             string t = titulo.ToLower();
@@ -282,7 +222,7 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
             return "General";
         }
 
-        // Palabras clave agrícolas + incluye cultivo y tema como contexto
+        // ✅ Palabras clave con stopwords + cultivo y tema prioritarios
         private string GenerarPalabrasClave(string texto, string cultivo, string tema)
         {
             if (string.IsNullOrWhiteSpace(texto)) return string.Empty;
@@ -292,13 +232,12 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
                     StringSplitOptions.RemoveEmptyEntries)
                 .Select(w => w.ToLower().Trim())
                 .Where(w => w.Length > 4)
-                .Where(w => !_stopWords.Contains(w))     // filtrar stopwords
-                .Where(w => !double.TryParse(w, out _))  // filtrar números puros
+                .Where(w => !_stopWords.Contains(w))
+                .Where(w => !double.TryParse(w, out _))
                 .Distinct()
                 .Take(25)
                 .ToList();
 
-            //  Agregar cultivo y tema como palabras clave prioritarias
             if (cultivo != "General") palabras.Insert(0, cultivo.ToLower());
             if (tema != "General") palabras.Insert(0, tema.ToLower().Replace(" ", "_"));
 
