@@ -3,6 +3,7 @@ using AgroGuia.Dominio.Modelo.Entidades;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
 
 namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
@@ -12,75 +13,36 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
         private readonly IEmbeddingRepositorio _embeddingRepositorio;
         private readonly IEmbeddingService _embeddingService;
 
-        // ✅ Cultivos específicos de la Sierra Norte del Ecuador
-        private static readonly Dictionary<string, string> _cultivos = new()
+        // Diccionarios mejorados y más completos
+        private static readonly Dictionary<string, string> _cultivos = new(StringComparer.OrdinalIgnoreCase)
         {
-            { "papa", "Papa" },
-            { "quinua", "Quinua" },
-            { "quinoa", "Quinua" },
-            { "maiz", "Maíz" },
-            { "maíz", "Maíz" },
-            { "frejol", "Fréjol" },
-            { "fréjol", "Fréjol" },
-            { "hortaliza", "Hortalizas" },
-            { "zanahoria", "Zanahoria" },
-            { "cebolla", "Cebolla" },
-            { "lechuga", "Lechuga" },
-            { "brocoli", "Brócoli" },
-            { "brócoli", "Brócoli" },
-            { "tomate", "Tomate" },
-            { "arveja", "Arveja" },
-            { "haba", "Haba" },
-            { "trigo", "Trigo" },
-            { "cebada", "Cebada" },
-            { "pasto", "Pastos" },
-            { "forraje", "Forrajes" },
-            { "bioinsumo", "Bioinsumos" },
-            { "abono", "Abonos" }
+            { "papa", "Papa" }, { "quinua", "Quinua" }, { "quinoa", "Quinua" },
+            { "maiz", "Maíz" }, { "maíz", "Maíz" }, { "frejol", "Fréjol" },
+            { "hortaliza", "Hortalizas" }, { "zanahoria", "Zanahoria" },
+            { "cebolla", "Cebolla" }, { "lechuga", "Lechuga" }, { "brocoli", "Brócoli" },
+            { "tomate", "Tomate" }, { "arveja", "Arveja" }, { "haba", "Haba" },
+            { "trigo", "Trigo" }, { "cebada", "Cebada" }, { "arroz", "Arroz" }
         };
 
-        // ✅ Temas agronómicos ampliados
-        private static readonly Dictionary<string, string> _temas = new()
+        private static readonly Dictionary<string, string> _temas = new(StringComparer.OrdinalIgnoreCase)
         {
-            { "abono", "Fertilización" },
-            { "fertiliz", "Fertilización" },
-            { "organico", "Fertilización Orgánica" },
-            { "orgánico", "Fertilización Orgánica" },
-            { "bioinsumo", "Bioinsumos" },
-            { "bokashi", "Bioinsumos" },
-            { "compost", "Bioinsumos" },
-            { "biol", "Bioinsumos" },
-            { "bpa", "Buenas Prácticas Agrícolas" },
-            { "buenas practicas", "Buenas Prácticas Agrícolas" },
-            { "plaga", "Sanidad Vegetal" },
-            { "enfermedad", "Sanidad Vegetal" },
-            { "fungicida", "Sanidad Vegetal" },
-            { "insecticida", "Sanidad Vegetal" },
-            { "riego", "Riego y Agua" },
-            { "agua", "Riego y Agua" },
-            { "cosecha", "Cosecha y Postcosecha" },
-            { "postcosecha", "Cosecha y Postcosecha" },
-            { "almacenamiento", "Cosecha y Postcosecha" },
-            { "suelo", "Manejo de Suelos" },
-            { "labranza", "Manejo de Suelos" },
-            { "siembra", "Siembra y Trasplante" },
-            { "trasplante", "Siembra y Trasplante" },
-            { "semilla", "Semillas" },
-            { "variedad", "Semillas" },
-            { "clima", "Clima y Altitud" },
-            { "altitud", "Clima y Altitud" },
-            { "temperatura", "Clima y Altitud" }
+            { "abono", "Fertilización" }, { "fertiliz", "Fertilización" },
+            { "organico", "Fertilización Orgánica" }, { "bioinsumo", "Bioinsumos" },
+            { "biol", "Bioinsumos" }, { "bokashi", "Bioinsumos" },
+            { "bpa", "Buenas Prácticas Agrícolas" }, { "buenas practicas", "Buenas Prácticas Agrícolas" },
+            { "plaga", "Sanidad Vegetal" }, { "enfermedad", "Sanidad Vegetal" },
+            { "fungicida", "Sanidad Vegetal" }, { "insecticida", "Sanidad Vegetal" },
+            { "riego", "Riego y Agua" }, { "cosecha", "Cosecha y Postcosecha" },
+            { "suelo", "Manejo de Suelos" }, { "siembra", "Siembra y Trasplante" },
+            { "semilla", "Semillas" }, { "clima", "Clima y Altitud" }
         };
 
-        // ✅ Palabras vacías en español
-        private static readonly HashSet<string> _stopWords = new()
+        private static readonly HashSet<string> _stopWords = new(StringComparer.OrdinalIgnoreCase)
         {
-            "para", "como", "este", "esta", "estos", "estas", "desde",
-            "hasta", "entre", "sobre", "todos", "todas", "puede", "tiene",
-            "hacer", "debe", "cada", "también", "cuando", "donde", "cuanto",
-            "según", "segun", "dicha", "dicho", "mientras", "además", "ademas",
-            "través", "traves", "durante", "mediante", "tanto", "siendo",
-            "otros", "otras", "mismo", "misma", "mayor", "menor", "mejor"
+            "para", "como", "este", "esta", "estos", "estas", "desde", "hasta", "entre",
+            "sobre", "todos", "todas", "puede", "tiene", "hacer", "debe", "cada", "también",
+            "cuando", "donde", "cuanto", "según", "dicha", "dicho", "mientras", "además",
+            "través", "durante", "mediante", "tanto", "siendo", "otros", "otras", "mismo"
         };
 
         public DocumentLoaderService(
@@ -115,7 +77,7 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
                 }
             }
 
-            Console.WriteLine($"🎉 Carga completada. Total: {totalCargados} documentos.");
+            Console.WriteLine($"🎉 Carga completada. Total documentos: {totalCargados}");
             return totalCargados;
         }
 
@@ -124,44 +86,33 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
             string titulo = Path.GetFileNameWithoutExtension(pdfPath);
 
             using var document = PdfDocument.Open(pdfPath);
-            var contenidoCompleto = new StringBuilder();
+            var sb = new StringBuilder();
 
             foreach (var page in document.GetPages())
             {
-                contenidoCompleto.AppendLine(page.Text);
+                sb.AppendLine(page.Text);
             }
 
-            string textoCompleto = contenidoCompleto.ToString().Trim();
-            if (string.IsNullOrWhiteSpace(textoCompleto)) return;
+            string textoCompleto = LimpiarTexto(sb.ToString().Trim());
 
-            var chunks = DividirEnChunks(textoCompleto, 1100);
+            if (string.IsNullOrWhiteSpace(textoCompleto) || textoCompleto.Length < 50)
+            {
+                Console.WriteLine($"⚠️ PDF sin contenido útil: {titulo}");
+                return;
+            }
 
-            // ✅ Detectar cultivo y tema una sola vez por documento
-            string cultivo = DetectarCultivo(titulo);
-            string tema = DetectarTema(titulo);
+            var chunks = DividirEnChunksInteligente(textoCompleto, 1150, 180);
 
-            Console.WriteLine($"📄 {titulo} → {chunks.Count} chunks | Cultivo: {cultivo} | Tema: {tema}");
+            string cultivo = DetectarCultivo(titulo, textoCompleto);
+            string tema = DetectarTema(titulo, textoCompleto);
+
+            Console.WriteLine($"📄 {titulo} | Chunks: {chunks.Count} | Cultivo: {cultivo} | Tema: {tema}");
 
             foreach (var chunk in chunks)
             {
                 if (string.IsNullOrWhiteSpace(chunk)) continue;
 
                 var embeddingResult = await _embeddingService.GenerarEmbeddingAsync(chunk);
-
-                if (!embeddingResult.Exito)
-                {
-                    Console.WriteLine($"❌ [EMBEDDING FALLÓ] Error: {embeddingResult.ErrorMensaje}");
-                    Console.WriteLine($"   Chunk preview: {chunk.Substring(0, Math.Min(80, chunk.Length))}...");
-                }
-                else
-                {
-                    Console.WriteLine($"✅ [EMBEDDING OK] Vector de {embeddingResult.Vector.Count} dimensiones");
-                }
-
-                // ✅ Calcular una sola vez para VectorEmbedding
-                string? vectorJson = embeddingResult.Exito
-                    ? JsonSerializer.Serialize(embeddingResult.Vector)
-                    : null;
 
                 var nuevoChunk = new EmbeddingChunks
                 {
@@ -173,15 +124,16 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
                     PalabrasClave = GenerarPalabrasClave(chunk, cultivo, tema),
                     FechaCarga = DateTime.UtcNow,
                     Activo = true,
-                    VectorEmbedding = vectorJson,
+                    VectorEmbedding = embeddingResult.Exito
+                        ? JsonSerializer.Serialize(embeddingResult.Vector)
+                        : null,
                     Metadata = JsonSerializer.Serialize(new
                     {
                         archivoOriginal = titulo,
                         tipo = "manual_tecnico",
-                        cultivo,
-                        tema,
-                        caracteres = chunk.Length,
-                        fechaCarga = DateTime.UtcNow
+                        cultivo = cultivo,
+                        tema = tema,
+                        longitud = chunk.Length
                     })
                 };
 
@@ -189,63 +141,78 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader
             }
         }
 
-        private List<string> DividirEnChunks(string texto, int maxCaracteres)
+        private string LimpiarTexto(string texto)
+        {
+            if (string.IsNullOrWhiteSpace(texto)) return string.Empty;
+
+            texto = Regex.Replace(texto, @"\.{3,}", " ");           // Eliminar puntos suspensivos
+            texto = Regex.Replace(texto, @"\s+", " ");              // Normalizar espacios
+            texto = texto.Replace("–", "-").Replace("—", "-");
+
+            return texto.Trim();
+        }
+
+        private List<string> DividirEnChunksInteligente(string texto, int chunkSize = 1150, int overlap = 180)
         {
             var chunks = new List<string>();
             int posicion = 0;
 
             while (posicion < texto.Length)
             {
-                int longitud = Math.Min(maxCaracteres, texto.Length - posicion);
-                string chunk = texto.Substring(posicion, longitud);
+                int fin = Math.Min(posicion + chunkSize, texto.Length);
+                string chunk = texto.Substring(posicion, fin - posicion);
+
+                // Mejorar corte en oraciones
+                if (fin < texto.Length)
+                {
+                    int ultimoPunto = chunk.LastIndexOfAny(new[] { '.', '!', '?' });
+                    if (ultimoPunto > chunkSize * 0.65)
+                        chunk = chunk.Substring(0, ultimoPunto + 1);
+                }
+
                 chunks.Add(chunk.Trim());
-                posicion += longitud;
+                posicion = fin - overlap;
+
+                if (posicion < 0) posicion = 0;
+                if (fin >= texto.Length) break;
             }
+
             return chunks;
         }
 
-        // ✅ Detecta cultivos con diccionario ampliado
-        private string DetectarCultivo(string titulo)
+        private string DetectarCultivo(string titulo, string contenido)
         {
-            string t = titulo.ToLower();
-            foreach (var kvp in _cultivos)
-                if (t.Contains(kvp.Key)) return kvp.Value;
+            string texto = (titulo + " " + contenido.Substring(0, Math.Min(1500, contenido.Length))).ToLower();
+            foreach (var kv in _cultivos)
+                if (texto.Contains(kv.Key)) return kv.Value;
             return "General";
         }
 
-        // ✅ Detecta temas con diccionario ampliado
-        private string DetectarTema(string titulo)
+        private string DetectarTema(string titulo, string contenido)
         {
-            string t = titulo.ToLower();
-            foreach (var kvp in _temas)
-                if (t.Contains(kvp.Key)) return kvp.Value;
+            string texto = (titulo + " " + contenido.Substring(0, Math.Min(1500, contenido.Length))).ToLower();
+            foreach (var kv in _temas)
+                if (texto.Contains(kv.Key)) return kv.Value;
             return "General";
         }
 
-        // ✅ Palabras clave con stopwords + cultivo y tema prioritarios
         private string GenerarPalabrasClave(string texto, string cultivo, string tema)
         {
-            if (string.IsNullOrWhiteSpace(texto)) return string.Empty;
+            if (string.IsNullOrWhiteSpace(texto)) return "";
 
-            var palabras = texto
-                .Split(new[] { ' ', '\n', '\r', ',', '.', ';', ':', '(', ')', '/', '\\' },
-                    StringSplitOptions.RemoveEmptyEntries)
+            var palabras = texto.Split(new[] { ' ', '\n', '\r', ',', '.', ';', ':', '(', ')', '/', '\\' },
+                StringSplitOptions.RemoveEmptyEntries)
                 .Select(w => w.ToLower().Trim())
-                .Where(w => w.Length > 4)
-                .Where(w => !_stopWords.Contains(w))
-                .Where(w => !double.TryParse(w, out _))
+                .Where(w => w.Length > 4 && !_stopWords.Contains(w) && !double.TryParse(w, out _))
                 .Distinct()
-                .Take(25)
+                .Take(28)
                 .ToList();
 
             if (cultivo != "General") palabras.Insert(0, cultivo.ToLower());
             if (tema != "General") palabras.Insert(0, tema.ToLower().Replace(" ", "_"));
 
-            string resultado = string.Join(",", palabras.Distinct());
-
-            return resultado.Length > 490
-                ? resultado[..490]
-                : resultado;
+            string resultado = string.Join(",", palabras);
+            return resultado.Length > 490 ? resultado.Substring(0, 490) : resultado;
         }
     }
 }

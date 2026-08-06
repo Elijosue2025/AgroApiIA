@@ -1,22 +1,38 @@
-﻿using AgroGuia.Dominio.Modelo.Abstracciones;
+﻿using AgroGuia.Aplicacion.Servicio;
+using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
+using AgroGuia.Infraestructura.ServicioExterno.Models;
 
-namespace AgroGuia.Aplicacion.ServicioImpl;
-
-public class RAGServicioImpl : IRAGServicio
+namespace AgroGuia.Aplicacion.ServicioImpl
 {
-    private readonly IConversacionRepositorio _conversacionRepositorio;
-
-    public RAGServicioImpl(IConversacionRepositorio conversacionRepositorio)
+    public class RAGServicioImpl : IRAGServicio
     {
-        _conversacionRepositorio = conversacionRepositorio;
-    }
+        private readonly IRAGEngine _ragEngine;
 
-    public async Task<List<string>> ObtenerContextoRelevanteAsync(string consulta)
-    {
-        if (string.IsNullOrWhiteSpace(consulta))
-            return new List<string>();
+        public RAGServicioImpl(IRAGEngine ragEngine)
+        {
+            _ragEngine = ragEngine;
+        }
 
-        return await _conversacionRepositorio
-            .ChunksBuscarRelevantesAsync(consulta, topK: 4);
+        public async Task<List<string>> ObtenerContextoRelevanteAsync(string consulta)
+        {
+            if (string.IsNullOrWhiteSpace(consulta))
+                return new List<string>();
+
+            var resultado = await _ragEngine.ProcesarConsultaAsync(consulta);
+
+            return resultado.ChunksUtilizados ?? new List<string>();
+        }
+
+        public async Task<RAGResponse> ProcesarConsultaCompletaAsync(string consulta)
+        {
+            if (string.IsNullOrWhiteSpace(consulta))
+                return new RAGResponse
+                {
+                    Exito = false,
+                    ErrorMensaje = "La consulta está vacía."
+                };
+
+            return await _ragEngine.ProcesarConsultaAsync(consulta);
+        }
     }
 }

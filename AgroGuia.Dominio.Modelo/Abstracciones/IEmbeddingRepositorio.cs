@@ -17,5 +17,8 @@ namespace AgroGuia.Dominio.Modelo.Abstracciones
         Task<List<EmbeddingChunks>> ObtenerActivosAsync();
 
         Task DesactivarChunkAsync(long id);
+        // En IEmbeddingRepositorio — agregar:
+        Task<List<EmbeddingChunks>> ObtenerChunksActivosConVectorAsync();
+
     }
 }

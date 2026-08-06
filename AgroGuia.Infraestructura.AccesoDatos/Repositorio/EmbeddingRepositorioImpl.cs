@@ -43,18 +43,14 @@ namespace AgroGuia.Infraestructura.AccesoDatos.Repositorio
         public async Task<List<EmbeddingChunks>> BuscarPorTemaAsync(string tema)
         {
             return await _context.EmbeddingChunks
-                .Where(x =>
-                    x.Tema != null &&
-                    x.Tema.Contains(tema))
+                .Where(x => x.Tema != null && x.Tema.Contains(tema))
                 .ToListAsync();
         }
 
         public async Task<List<EmbeddingChunks>> BuscarPorCultivoAsync(string cultivo)
         {
             return await _context.EmbeddingChunks
-                .Where(x =>
-                    x.Cultivo != null &&
-                    x.Cultivo.Contains(cultivo))
+                .Where(x => x.Cultivo != null && x.Cultivo.Contains(cultivo))
                 .ToListAsync();
         }
 
@@ -67,10 +63,26 @@ namespace AgroGuia.Infraestructura.AccesoDatos.Repositorio
                 throw new Exception("Chunk no encontrado");
 
             chunk.Activo = false;
-
             _context.EmbeddingChunks.Update(chunk);
-
             await _context.SaveChangesAsync();
+        }
+
+        // ✅ Solo trae los campos necesarios para el ranking vectorial
+        // No trae Metadata ni PalabrasClave para reducir el payload
+        public async Task<List<EmbeddingChunks>> ObtenerChunksActivosConVectorAsync()
+        {
+            return await _context.EmbeddingChunks
+                .Where(static c => c.Activo == true && c.VectorEmbedding != null)
+                .Select(c => new EmbeddingChunks
+                {
+                    Id = c.Id,
+                    Contenido = c.Contenido,
+                    VectorEmbedding = c.VectorEmbedding,
+                    Cultivo = c.Cultivo,
+                    Tema = c.Tema
+                })
+                .AsNoTracking()
+                .ToListAsync();
         }
     }
 }
