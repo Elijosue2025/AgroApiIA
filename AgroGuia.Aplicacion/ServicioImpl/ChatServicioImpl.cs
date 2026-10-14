@@ -8,35 +8,24 @@ namespace AgroGuia.Aplicacion.ServicioImpl;
 
 public class ChatServicioImpl : IChatServicio
 {
-    private readonly IOpenAIService _openAIService;
+    private readonly IRAGEngine _ragEngine;
     private readonly IConversacionRepositorio _conversacionRepositorio;
 
     public ChatServicioImpl(
-        IOpenAIService openAIService,
+        IRAGEngine ragEngine,
         IConversacionRepositorio conversacionRepositorio)
     {
-        _openAIService = openAIService ?? throw new ArgumentNullException(nameof(openAIService));
-        _conversacionRepositorio = conversacionRepositorio ?? throw new ArgumentNullException(nameof(conversacionRepositorio));
+        _ragEngine = ragEngine ?? throw new ArgumentNullException(nameof(ragEngine));
+        _conversacionRepositorio = conversacionRepositorio
+            ?? throw new ArgumentNullException(nameof(conversacionRepositorio));
     }
 
     public async Task<ChatResponseDto> ProcesarConsultaAsync(ConsultaRequestDto request)
     {
         try
         {
-            // 1. Obtener chunks relevantes desde EmbeddingChunks
-            List<string> chunks = await _conversacionRepositorio
-                .ChunksBuscarRelevantesAsync(request.Consulta, topK: 5);
+            var rag = await _ragEngine.ProcesarConsultaAsync(request.Consulta);
 
-            if (chunks == null || !chunks.Any())
-            {
-                chunks = new List<string> { "No se encontró información relevante en los manuales técnicos." };
-            }
-
-            // 2. Obtener respuesta de Ollama (principal)
-            var respuestaIA = await _openAIService
-                .ObtenerRespuestaConRAGAsync(request.Consulta, chunks);
-
-            // 3. Guardar mensaje del usuario
             await _conversacionRepositorio.MensajeGuardarAsync(new Mensajes
             {
                 ConversacionId = request.ConversacionId,
@@ -45,23 +34,22 @@ public class ChatServicioImpl : IChatServicio
                 Fecha = DateTime.UtcNow
             });
 
-            // 4. Guardar respuesta del asistente
             await _conversacionRepositorio.MensajeGuardarAsync(new Mensajes
             {
                 ConversacionId = request.ConversacionId,
                 Rol = "assistant",
-                Contenido = respuestaIA.Respuesta,
+                Contenido = rag.Respuesta,
                 Fecha = DateTime.UtcNow,
-                Tokens = respuestaIA.TokensTotales
+                Tokens = 0
             });
 
             return new ChatResponseDto
             {
-                Exito = true,
-                Respuesta = respuestaIA.Respuesta,
-                TokensUsados = respuestaIA.TokensTotales,
+                Exito = rag.Exito,
+                Respuesta = rag.Respuesta,
+                TokensUsados = 0,
                 FechaRespuesta = DateTime.UtcNow,
-                ErrorMensaje = respuestaIA.ErrorMensaje ?? ""
+                ErrorMensaje = rag.ErrorMensaje ?? ""
             };
         }
         catch (Exception ex)

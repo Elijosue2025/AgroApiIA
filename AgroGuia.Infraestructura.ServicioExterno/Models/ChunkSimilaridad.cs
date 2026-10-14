@@ -1,17 +1,19 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
 namespace AgroGuia.Infraestructura.ServicioExterno.Models
 {
-    public class ChunkSimilaridad
+    public sealed class ChunkSimilaridad
     {
-        public string Contenido { get; set; } = string.Empty;
-        public double Score { get; set; }
-        public string Cultivo { get; set; } = string.Empty;
-        public string Tema { get; set; } = string.Empty;
+        public long Id { get; init; }
+        public string Archivo { get; init; } = string.Empty;
+        public int Indice { get; init; }
+        public string Titulo { get; init; } = string.Empty;
+        public string? Seccion { get; init; }
+        public int? Pagina { get; init; }
+        public string Contenido { get; init; } = string.Empty;
+        public string Cultivo { get; init; } = "General";
+        public string Tema { get; init; } = "General";
+        /// <summary>Coseno real (0 si no hubo embedding de la pregunta).</summary>
+        public double Score { get; init; }
+        /// <summary>Puntaje de fusión RRF (vector + palabras clave).</summary>
+        public double ScoreFusion { get; init; }
     }
-
 }

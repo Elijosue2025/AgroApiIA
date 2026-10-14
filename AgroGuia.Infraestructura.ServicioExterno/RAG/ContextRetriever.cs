@@ -1,104 +1,71 @@
-﻿using AgroGuia.Dominio.Modelo.Abstracciones;
+﻿using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
+using AgroGuia.Infraestructura.ServicioExterno.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
+namespace AgroGuia.Infraestructura.ServicioExterno.RAG;
 
-using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
-
-namespace AgroGuia.Infraestructura.ServicioExterno.RAG
+/// <summary>
+/// MEJORAS:
+///  - UN solo embedding por pregunta (RagEngine y ContextRetriever lo generaban cada uno).
+///  - Ya no devuelve strings de error ("No se encontró información...") que terminaban
+///    dentro del prompt como si fueran contexto real. Devuelve lista vacía.
+///  - El fallback textual SQL LIKE se reemplazó por BM25 en memoria (misma búsqueda híbrida
+///    sin vector), así que ya no depende de IConversacionRepositorio.
+///  - Expansión de vecinos (parent-child sin cambiar el esquema): el acierto se localiza con el chunk
+///    pequeño y al LLM se le da el chunk + vecinos de la misma sección, desduplicando párrafos.
+/// </summary>
+public sealed class ContextRetriever
 {
-    public class ContextRetriever
+    private readonly IEmbeddingService _embeddings;
+    private readonly IVectorSearchService _search;
+    private readonly IVectorIndex _index;
+    private readonly RagOptions _opt;
+    private readonly ILogger<ContextRetriever> _log;
+
+    public ContextRetriever(IEmbeddingService embeddings, IVectorSearchService search, IVectorIndex index,
+        IOptions<RagOptions> opt, ILogger<ContextRetriever> log)
     {
-        private readonly IConversacionRepositorio _conversacionRepositorio;
-        private readonly IEmbeddingService _embeddingService;
-        private readonly IVectorSearchService _vectorSearchService;
+        _embeddings = embeddings; _search = search; _index = index; _opt = opt.Value; _log = log;
+    }
 
-        public ContextRetriever(
-            IConversacionRepositorio conversacionRepositorio,
-            IEmbeddingService embeddingService,
-            IVectorSearchService vectorSearchService)
+    public async Task<IReadOnlyList<ContextoRecuperado>> ObtenerContextoAsync(
+        string pregunta, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(pregunta)) return Array.Empty<ContextoRecuperado>();
+
+        float[]? vector = null;
+        var emb = await _embeddings.GenerarEmbeddingConsultaAsync(pregunta, ct);
+        if (emb.Exito) vector = emb.Vector;
+        else _log.LogWarning("Embedding de la pregunta falló ({E}); se usa solo búsqueda por palabras clave", emb.ErrorMensaje);
+
+        var aciertos = await _search.BuscarAsync(pregunta, vector, _opt.TopK, ct);
+        if (aciertos.Count == 0) return Array.Empty<ContextoRecuperado>();
+
+        var snap = await _index.ObtenerAsync(ct);
+        var cubiertos = new HashSet<(string, int)>();
+        var resultado = new List<ContextoRecuperado>();
+
+        foreach (var h in aciertos)
         {
-            _conversacionRepositorio = conversacionRepositorio;
-            _embeddingService = embeddingService;
-            _vectorSearchService = vectorSearchService;
+            if (cubiertos.Contains((h.Archivo, h.Indice))) continue;   // ya incluido por otra expansión
+
+            var vecinos = snap.PorArchivo.TryGetValue(h.Archivo, out var doc)
+                ? doc.Where(c => Math.Abs(c.Indice - h.Indice) <= _opt.VecinosContexto && c.Seccion == h.Seccion).ToList()
+                : new List<IndexedChunk>();
+
+            var vistos = new HashSet<string>();
+            var parrafos = new List<string>();
+            foreach (var v in vecinos.Count > 0 ? vecinos.Select(x => x.Contenido) : new[] { h.Contenido })
+                foreach (var p in v.Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+                    if (vistos.Add(p)) parrafos.Add(p);
+
+            foreach (var v in vecinos) cubiertos.Add((v.Archivo, v.Indice));
+            cubiertos.Add((h.Archivo, h.Indice));
+
+            resultado.Add(new ContextoRecuperado(
+                string.Join("\n\n", parrafos), h.Titulo, h.Seccion, h.Pagina, h.Score));
         }
-
-        /// <summary>
-        /// Flujo principal: Embedding → Cosine Similarity → Top K chunks
-        /// Fallback: búsqueda textual LIKE si Ollama no responde
-        /// </summary>
-        public async Task<List<string>> ObtenerChunksAsync(
-            string preguntaUsuario, int topK = 4)
-        {
-            if (string.IsNullOrWhiteSpace(preguntaUsuario))
-                return new List<string>();
-
-            try
-            {
-                // 1. Generar embedding de la pregunta
-                var embeddingResult = await _embeddingService
-                    .GenerarEmbeddingAsync(preguntaUsuario);
-
-                if (!embeddingResult.Exito)
-                {
-                    Console.WriteLine($"⚠️ Embedding falló: {embeddingResult.ErrorMensaje} → fallback textual");
-                    return await FallbackTextualAsync(preguntaUsuario, topK);
-                }
-
-                // 2. Ranking vectorial por cosine similarity
-                var chunksRankeados = await _vectorSearchService
-                    .BuscarPorVectorAsync(embeddingResult.Vector, topK);
-
-                if (chunksRankeados == null || !chunksRankeados.Any())
-                {
-                    Console.WriteLine("⚠️ Sin resultados vectoriales → fallback textual");
-                    return await FallbackTextualAsync(preguntaUsuario, topK);
-                }
-
-                Console.WriteLine($"✅ {chunksRankeados.Count} chunks por similitud vectorial " +
-                                  $"(top score: {chunksRankeados[0].Score:F3})");
-
-                return chunksRankeados
-                    .Select(c => c.Contenido)
-                    .ToList();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ [ContextRetriever] {ex.Message} → fallback textual");
-                return await FallbackTextualAsync(preguntaUsuario, topK);
-            }
-        }
-
-        private async Task<List<string>> FallbackTextualAsync(
-            string pregunta, int topK)
-        {
-            try
-            {
-                var chunks = await _conversacionRepositorio
-                    .BuscarChunksRelevantesAsync(pregunta);
-
-                if (chunks == null || !chunks.Any())
-                    return new List<string>
-                    {
-                        "No se encontró información en las guías técnicas."
-                    };
-
-                Console.WriteLine($"✅ {Math.Min(chunks.Count, topK)} chunks por palabras clave (fallback)");
-                return chunks.Take(topK).ToList();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ [Fallback Error] {ex.Message}");
-                return new List<string>
-                {
-                    "Error al recuperar información de la base de conocimiento."
-                };
-            }
-        }
-
-        public async Task<List<string>> ObtenerChunksAvanzadoAsync(
-            string preguntaUsuario, int topK = 5)
-        {
-            // Usa directamente el flujo vectorial con más resultados
-            return await ObtenerChunksAsync(preguntaUsuario, topK);
-        }
+        return resultado;
     }
 }

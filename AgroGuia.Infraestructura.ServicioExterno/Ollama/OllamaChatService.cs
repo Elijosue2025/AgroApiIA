@@ -1,72 +1,89 @@
-﻿using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
+﻿using System.Text;
+using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
 using AgroGuia.Infraestructura.ServicioExterno.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using OllamaSharp;
+using OllamaSharp.Models;
 using OllamaSharp.Models.Chat;
 
-namespace AgroGuia.Infraestructura.ServicioExterno.Ollama
+namespace AgroGuia.Infraestructura.ServicioExterno.Ollama;
+
+/// <summary>
+/// MEJORAS (eran los bugs de mayor impacto):
+///  1) Ya NO trunca cada chunk a 500 caracteres (indexabas 1150 y el modelo veía menos de la mitad).
+///  2) Ya NO usa chat.SendAsAsync(ChatRole.System, ...): cada llamada generaba una respuesta del
+///     modelo que se descartaba (2 generaciones inútiles por consulta) y contaminaba el historial.
+///     Ahora es UNA petición con [system, user].
+///  3) Fija num_ctx (8192): por defecto Ollama usa un contexto pequeño y recorta el prompt sin avisar.
+///  4) Temperatura y max tokens por configuración; devuelve tokens reales; advierte si el prompt
+///     se acerca al límite de contexto.
+///  5) Errores reales: Exito=false + ErrorMensaje (antes Exito=true con texto genérico).
+///  6) Sin prompt aquí: el adaptador solo envía; PromptBuilder decide el contenido (DIP).
+/// Verifica los nombres de ChatRequest/Message/RequestOptions con tu versión de OllamaSharp (5.x).
+/// </summary>
+public sealed class OllamaChatService : IChatCompletionService
 {
-    public class OllamaChatService : IOpenAIService
+    private readonly IOllamaApiClient _client;
+    private readonly OllamaOptions _opt;
+    private readonly ILogger<OllamaChatService> _log;
+
+    public OllamaChatService(IOllamaApiClient client, IOptions<OllamaOptions> opt, ILogger<OllamaChatService> log)
     {
-        private readonly OllamaApiClient _client;
-        private readonly string _modelName = "llama3.2:3b"; // Cambia a "qwen2.5:7b" si tienes más RAM
+        _client = client; _opt = opt.Value; _log = log;
+    }
 
-        public OllamaChatService()
+    public async Task<ChatCompletionResult> GenerarAsync(ChatPrompt prompt, CancellationToken ct = default)
+    {
+        try
         {
-            _client = new OllamaApiClient(new Uri("http://localhost:11434"));
-            _client.SelectedModel = _modelName;
-        }
-        private string GenerarRespuestaFallback(string pregunta, List<string> chunks)
-        {
-            if (chunks == null || !chunks.Any())
-                return "Lo siento, no tengo información suficiente en los manuales para responder esta consulta.";
-
-            return $"**Información encontrada en los manuales técnicos:**\n\n" +
-                   string.Join("\n\n", chunks.Take(4));
-        }
-        public async Task<OpenAIChatResponse> ObtenerRespuestaConRAGAsync(
-            string mensajeUsuario, List<string> chunksRelevantes)
-        {
-            try
+            var request = new ChatRequest
             {
-                var chat = new Chat(_client);
-
-                string systemPrompt = @"
-                Eres AgroGuia IA, un ingeniero agrónomo experto de la Sierra Norte del Ecuador (Carchi).
-                Responde de forma clara, práctica y útil para agricultores.
-                Sé honesto si no tienes información suficiente en el contexto.";
-
-                await foreach (var _ in chat.SendAsAsync(ChatRole.System, systemPrompt)) { }
-
-                if (chunksRelevantes?.Any() == true)
+                Model = _opt.ChatModel,
+                Stream = true,
+                Messages = new List<Message>
                 {
-                    string contexto = string.Join("\n\n────────────────────\n\n",
-                        chunksRelevantes.Select(c =>
-                            c.Length > 500 ? c.Substring(0, 500) + "..." : c));
-                    await foreach (var _ in chat.SendAsAsync(ChatRole.System, $"CONTEXTO DE LOS MANUALES TÉCNICOS:\n{contexto}")) { }
+                    new(ChatRole.System, prompt.Sistema),
+                    new(ChatRole.User, prompt.Usuario)
+                },
+                Options = new RequestOptions
+                {
+                    NumCtx = _opt.NumCtx,
+                    Temperature = _opt.Temperature,
+                    NumPredict = _opt.MaxTokens
                 }
+            };
 
-                string respuesta = "";
-                await foreach (var fragmento in chat.SendAsAsync(ChatRole.User, mensajeUsuario))
-                {
-                    respuesta += fragmento;
-                }
+            var sb = new StringBuilder();
+            int tokensIn = 0, tokensOut = 0;
 
-                return new OpenAIChatResponse
-                {
-                    Exito = true,
-                    Respuesta = respuesta.Trim(),
-                    TokensTotales = 0
-                };
-            }
-            catch (Exception ex)
+            await foreach (var item in _client.ChatAsync(request, ct))
             {
-                Console.WriteLine($"[Ollama Error] {ex.Message}");
-                return new OpenAIChatResponse
+                if (item?.Message?.Content is { } fragmento) sb.Append(fragmento);
+                if (item is ChatDoneResponseStream done)
                 {
-                    Exito = true,
-                    Respuesta = "Lo siento, el asistente local no está disponible en este momento."
-                };
+                    tokensIn = done.PromptEvalCount;
+                    tokensOut = done.EvalCount;
+                }
             }
+
+            if (tokensIn >= _opt.NumCtx - _opt.MaxTokens)
+                _log.LogWarning("Prompt de {T} tokens cerca del límite num_ctx={C}: puede haberse truncado",
+                                tokensIn, _opt.NumCtx);
+
+            return new ChatCompletionResult
+            {
+                Exito = true,
+                Respuesta = sb.ToString().Trim(),
+                TokensEntrada = tokensIn,
+                TokensSalida = tokensOut
+            };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Error consultando el modelo de chat en Ollama");
+            return new ChatCompletionResult { Exito = false, ErrorMensaje = ex.Message };
         }
     }
 }

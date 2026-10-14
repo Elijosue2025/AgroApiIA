@@ -1,16 +1,14 @@
-﻿using AgroGuia.Infraestructura.ServicioExterno.Models;
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
+using AgroGuia.Infraestructura.ServicioExterno.Models;
 
 namespace AgroGuia.Infraestructura.ServicioExterno.Interfaces
 {
     public interface IVectorSearchService
     {
-        Task<List<ChunkSimilaridad>> BuscarPorVectorAsync(
-            List<float> vectorConsulta,
-            int topK = 4);
+        /// <summary>Búsqueda híbrida (vector + palabras clave). vectorConsulta puede ser null si falló el embedding.</summary>
+        Task<IReadOnlyList<ChunkSimilaridad>> BuscarAsync(
+            string pregunta, float[]? vectorConsulta, int topK, CancellationToken ct = default);
     }
 }

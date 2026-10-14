@@ -1,45 +1,36 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Numerics;
 
-namespace AgroGuia.Infraestructura.ServicioExterno.RAG
+namespace AgroGuia.Infraestructura.ServicioExterno.RAG;
+
+/// <summary>
+/// MEJORAS: se normaliza una sola vez (al cargar el índice) y luego el coseno es solo
+/// producto punto, vectorizado con SIMD. Es stateless → singleton.
+/// </summary>
+public sealed class SimilarityService
 {
-    public class SimilarityService
+    public float[] Normalizar(float[] v)
     {
-        /// <summary>
-        /// Calcula la similitud coseno entre dos vectores de embedding.
-        /// Retorna un valor entre 0.0 (sin similitud) y 1.0 (idénticos).
-        /// </summary>
-        public double CalcularCosineSimilarity(
-            List<float> vectorA,
-            List<float> vectorB)
-        {
-            if (vectorA.Count != vectorB.Count)
-            {
-                Console.WriteLine($"⚠️ Dimensiones distintas: {vectorA.Count} vs {vectorB.Count}");
-                return 0;
-            }
-
-            double productoPunto = 0;
-            double magnitudA = 0;
-            double magnitudB = 0;
-
-            for (int i = 0; i < vectorA.Count; i++)
-            {
-                productoPunto += vectorA[i] * vectorB[i];
-                magnitudA += vectorA[i] * vectorA[i];
-                magnitudB += vectorB[i] * vectorB[i];
-            }
-
-            magnitudA = Math.Sqrt(magnitudA);
-            magnitudB = Math.Sqrt(magnitudB);
-
-            if (magnitudA == 0 || magnitudB == 0)
-                return 0;
-
-            return productoPunto / (magnitudA * magnitudB);
-        }
+        double suma = 0;
+        foreach (var x in v) suma += (double)x * x;
+        var norma = (float)Math.Sqrt(suma);
+        var r = new float[v.Length];
+        if (norma == 0) { Array.Copy(v, r, v.Length); return r; }
+        for (int i = 0; i < v.Length; i++) r[i] = v[i] / norma;
+        return r;
     }
+
+    /// <summary>Con vectores ya normalizados, esto ES el coseno.</summary>
+    public float ProductoPunto(float[] a, float[] b)
+    {
+        int n = Math.Min(a.Length, b.Length), i = 0;
+        var acc = Vector<float>.Zero;
+        int w = Vector<float>.Count;
+        for (; i <= n - w; i += w) acc += new Vector<float>(a, i) * new Vector<float>(b, i);
+        float suma = Vector.Sum(acc);
+        for (; i < n; i++) suma += a[i] * b[i];
+        return suma;
+    }
+
+    public double CalcularCosineSimilarity(float[] a, float[] b) =>
+        a.Length != b.Length ? 0 : ProductoPunto(Normalizar(a), Normalizar(b));
 }

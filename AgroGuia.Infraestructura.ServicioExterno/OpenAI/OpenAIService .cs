@@ -2,6 +2,7 @@
 using AgroGuia.Infraestructura.ServicioExterno.Models;
 using Microsoft.Extensions.Options;
 using OpenAI;
+
 using OpenAI.Chat;
 
 namespace AgroGuia.Infraestructura.ServicioExterno.OpenAI
