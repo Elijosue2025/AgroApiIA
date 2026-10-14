@@ -5,6 +5,7 @@ namespace AgroGuia.Aplicacion.Servicio;
 public interface IAuthServicio
 {
     Task<LoginResponseDto> RegistrarAsync(RegistroRequestDto request);
-
     Task<LoginResponseDto> LoginAsync(LoginRequestDto request);
+    Task<LoginResponseDto> RefrescarAsync(string refreshToken);
+    Task CerrarSesionAsync(long usuarioId);
 }

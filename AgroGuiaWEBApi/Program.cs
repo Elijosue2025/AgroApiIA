@@ -15,6 +15,13 @@ var builder = WebApplication.CreateBuilder(args);
 // ==================== SERVICIOS ====================
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+        policy.WithOrigins("http://localhost:8081", "http://localhost:19006")
+              .AllowAnyHeader()
+              .AllowAnyMethod());
+});
 
 // ==================== BASE DE DATOS ====================
 var connectionString = builder.Configuration.GetConnectionString("ConexionDBAgroGuia");
@@ -106,6 +113,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseCors("AllowFrontend");   // antes de UseAuthentication
+
 app.UseAuthentication();   // ← Importante: antes de Authorization
 app.UseAuthorization();
 app.MapControllers();

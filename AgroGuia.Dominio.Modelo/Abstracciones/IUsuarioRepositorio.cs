@@ -1,6 +1,5 @@
 ﻿using AgroGuia.Dominio.Modelo.Entidades;
 
-
 namespace AgroGuia.Dominio.Modelo.Abstracciones
 {
     public interface IUsuarioRepositorio
@@ -8,6 +7,7 @@ namespace AgroGuia.Dominio.Modelo.Abstracciones
         Task CrearUsuarioAsync(Usuarios usuario);
         Task<Usuarios?> ObtenerPorEmailAsync(string email);
         Task<Usuarios?> ObtenerPorIdAsync(long id);
+        Task<Usuarios?> ObtenerPorRefreshTokenAsync(string refreshTokenHash);
         Task<List<Usuarios>> ObtenerTodosAsync();
         Task ActualizarUsuarioAsync(Usuarios usuario);
         Task EliminarUsuarioAsync(long id);

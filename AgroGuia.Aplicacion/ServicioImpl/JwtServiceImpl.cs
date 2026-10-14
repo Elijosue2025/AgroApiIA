@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace AgroGuia.Aplicacion.ServicioImpl;
@@ -16,36 +17,34 @@ public class JwtServiceImpl : IJwtService
         _configuration = configuration;
     }
 
-    public string GenerarToken(long idUsuario, string nombre, string email)
+    public int MinutosExpiracion => LeerEntero("Jwt:ExpirationMinutes", 60);
+    public int DiasRefreshToken => LeerEntero("Jwt:RefreshTokenDays", 7);
+
+    private int LeerEntero(string clave, int porDefecto) =>
+        int.TryParse(_configuration[clave], out var valor) && valor > 0 ? valor : porDefecto;
+
+    public string GenerarToken(long idUsuario, string nombre, string email, string rol)
     {
         var key = Encoding.UTF8.GetBytes(
             _configuration["Jwt:SecretKey"]
             ?? throw new InvalidOperationException("Jwt:SecretKey no configurado"));
-
-        // Fallback a 480 minutos si no está configurado o es inválido
-        int minutos = 480;
-        var minutosConfig = _configuration["Jwt:ExpirationMinutes"];
-        if (!string.IsNullOrWhiteSpace(minutosConfig) &&
-            int.TryParse(minutosConfig, out int minutosParseados) &&
-            minutosParseados > 0)
-        {
-            minutos = minutosParseados;
-        }
 
         var ahora = DateTime.UtcNow;
 
         var claims = new List<Claim>
         {
             new Claim("IdUsuario", idUsuario.ToString()),
+            new Claim(ClaimTypes.NameIdentifier, idUsuario.ToString()),
             new Claim(ClaimTypes.Name, nombre),
-            new Claim(ClaimTypes.Email, email)
+            new Claim(ClaimTypes.Email, email),
+            new Claim(ClaimTypes.Role, rol)
         };
 
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            NotBefore = ahora,                          // ← explícito
-            Expires = ahora.AddMinutes(minutos),        // ← siempre > NotBefore
+            NotBefore = ahora,
+            Expires = ahora.AddMinutes(MinutosExpiracion),
             Issuer = _configuration["Jwt:Issuer"],
             Audience = _configuration["Jwt:Audience"],
             SigningCredentials = new SigningCredentials(
@@ -56,4 +55,11 @@ public class JwtServiceImpl : IJwtService
         var tokenHandler = new JwtSecurityTokenHandler();
         return tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
     }
+
+    public string GenerarRefreshToken() =>
+        Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+
+    // En la BD se guarda el hash, nunca el refresh token en claro
+    public string HashRefreshToken(string refreshToken) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(refreshToken)));
 }

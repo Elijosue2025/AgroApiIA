@@ -76,7 +76,19 @@ namespace AgroGuia.Infraestructura.AccesoDatos.Repositorio
                 throw new Exception("Error al actualizar usuario", ex);
             }
         }
-
+        public async Task<Usuarios?> ObtenerPorRefreshTokenAsync(string refreshTokenHash)
+        {
+            try
+            {
+                return await _context.Usuarios
+                    .FirstOrDefaultAsync(u => u.RefreshToken == refreshTokenHash);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("Error al obtener usuario por refresh token", ex);
+            }
+        }
+      
         public async Task EliminarUsuarioAsync(long id)
         {
             try

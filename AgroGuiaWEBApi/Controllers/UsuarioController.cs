@@ -1,4 +1,5 @@
-﻿using AgroGuia.Dominio.Modelo.Abstracciones;
+﻿using AgroGuia.Aplicacion.Servicio;
+using AgroGuiaWEBApi.Extensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,21 +10,24 @@ namespace AgroGuiaWEBApi.Controllers;
 [Authorize]
 public class UsuarioController : ControllerBase
 {
-    private readonly IUsuarioRepositorio _usuarioRepositorio;
+    private readonly IUsuarioServicio _usuarioServicio;
 
-    public UsuarioController(
-        IUsuarioRepositorio usuarioRepositorio)
+    public UsuarioController(IUsuarioServicio usuarioServicio)
     {
-        _usuarioRepositorio = usuarioRepositorio;
+        _usuarioServicio = usuarioServicio;
     }
 
+    // Solo administradores
     [HttpGet]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> ObtenerTodos()
-    {
-        var usuarios =
-            await _usuarioRepositorio
-                .ObtenerTodosAsync();
+        => Ok(await _usuarioServicio.ObtenerUsuariosAsync());
 
-        return Ok(usuarios);
+    // Datos del usuario logueado (el id sale del token)
+    [HttpGet("me")]
+    public async Task<IActionResult> ObtenerActual()
+    {
+        var usuario = await _usuarioServicio.ObtenerUsuarioPorIdAsync(User.GetUserId());
+        return usuario is null ? NotFound() : Ok(usuario);
     }
 }

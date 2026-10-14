@@ -1,5 +1,7 @@
 ﻿using AgroGuia.Aplicacion.DTO.DTOS.Auth;
 using AgroGuia.Aplicacion.Servicio;
+using AgroGuiaWEBApi.Extensions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AgroGuiaWEBApi.Controllers;
@@ -16,22 +18,22 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("registro")]
-    public async Task<IActionResult> Registro(
-        RegistroRequestDto request)
-    {
-        var resultado =
-            await _authServicio.RegistrarAsync(request);
-
-        return Ok(resultado);
-    }
+    public async Task<IActionResult> Registro(RegistroRequestDto request)
+        => Ok(await _authServicio.RegistrarAsync(request));
 
     [HttpPost("login")]
-    public async Task<IActionResult> Login(
-        LoginRequestDto request)
-    {
-        var resultado =
-            await _authServicio.LoginAsync(request);
+    public async Task<IActionResult> Login(LoginRequestDto request)
+        => Ok(await _authServicio.LoginAsync(request));
 
-        return Ok(resultado);
+    [HttpPost("refresh")]
+    public async Task<IActionResult> Refresh(RefreshRequestDto request)
+        => Ok(await _authServicio.RefrescarAsync(request.RefreshToken));
+
+    [Authorize]
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout()
+    {
+        await _authServicio.CerrarSesionAsync(User.GetUserId());
+        return NoContent();
     }
 }
