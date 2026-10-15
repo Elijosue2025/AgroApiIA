@@ -67,21 +67,25 @@ namespace AgroGuia.Infraestructura.AccesoDatos.Repositorio
             await _context.SaveChangesAsync();
         }
 
-        // ✅ Solo trae los campos necesarios para el ranking vectorial
-        // No trae Metadata ni PalabrasClave para reducir el payload
+        /// <summary>
+        /// Carga chunks para el índice en memoria.
+        /// DEBE incluir Titulo y Metadata (version, archivo, seccion, etc.).
+        /// </summary>
         public async Task<List<EmbeddingChunks>> ObtenerChunksActivosConVectorAsync()
         {
             return await _context.EmbeddingChunks
-                .Where(static c => c.Activo == true && c.VectorEmbedding != null)
+                .AsNoTracking()
+                .Where(c => c.Activo == true && c.VectorEmbedding != null)
                 .Select(c => new EmbeddingChunks
                 {
                     Id = c.Id,
+                    Titulo = c.Titulo,
                     Contenido = c.Contenido,
                     VectorEmbedding = c.VectorEmbedding,
                     Cultivo = c.Cultivo,
-                    Tema = c.Tema
+                    Tema = c.Tema,
+                    Metadata = c.Metadata
                 })
-                .AsNoTracking()
                 .ToListAsync();
         }
     }
