@@ -174,7 +174,8 @@ public class DocumentLoaderService
         var palabras = TextoUtil.PalabrasClave(texto, 25).ToList();
         if (cultivo != "General") palabras.Insert(0, cultivo.ToLowerInvariant());
         if (tema != "General") palabras.Insert(0, tema.ToLowerInvariant().Replace(' ', '_'));
-        return TextoUtil.ParaVarchar(string.Join(",", palabras), 490, cortarEnComa: true);
+        // PalabrasClave es varchar(300) (ver AgroGuiaIA_DBContext): con 490 el INSERT fallaba por truncamiento.
+        return TextoUtil.ParaVarchar(string.Join(",", palabras), 290, cortarEnComa: true);
     }
 
     private static async Task<string> HashAsync(string ruta, CancellationToken ct)

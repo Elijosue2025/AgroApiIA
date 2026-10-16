@@ -37,7 +37,9 @@ public sealed class RagEngine : IRAGEngine
             if (recuperados.Count == 0)
                 return new RAGResponse
                 {
-                    Exito = true, Pregunta = preguntaUsuario, SinContexto = true,
+                    Exito = true,
+                    Pregunta = preguntaUsuario,
+                    SinContexto = true,
                     Respuesta = PromptBuilder.RespuestaSinInformacion
                 };
 

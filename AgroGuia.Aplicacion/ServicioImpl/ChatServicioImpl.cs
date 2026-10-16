@@ -1,10 +1,12 @@
-﻿using AgroGuia.Aplicacion.DTO.DTOS.Chat;
+﻿using System.Diagnostics;
+using AgroGuia.Aplicacion.DTO.DTOS.Chat;
 using AgroGuia.Aplicacion.Servicio;
 using AgroGuia.Dominio.Modelo.Abstracciones;
 using AgroGuia.Dominio.Modelo.Entidades;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
 using AgroGuia.Infraestructura.ServicioExterno.Models;
 using AgroGuia.Infraestructura.ServicioExterno.RAG;
+using Microsoft.Extensions.Logging;
 
 namespace AgroGuia.Aplicacion.ServicioImpl;
 
@@ -14,17 +16,20 @@ public class ChatServicioImpl : IChatServicio
     private readonly PromptBuilder _promptBuilder;
     private readonly IChatCompletionService _chat;
     private readonly IConversacionRepositorio _conversacionRepositorio;
+    private readonly ILogger<ChatServicioImpl> _log;
 
     public ChatServicioImpl(
         ContextRetriever contextRetriever,
         PromptBuilder promptBuilder,
         IChatCompletionService chat,
-        IConversacionRepositorio conversacionRepositorio)
+        IConversacionRepositorio conversacionRepositorio,
+        ILogger<ChatServicioImpl> log)
     {
         _contextRetriever = contextRetriever;
         _promptBuilder = promptBuilder;
         _chat = chat;
         _conversacionRepositorio = conversacionRepositorio;
+        _log = log;
     }
 
     public async Task<ChatResponseDto> ProcesarConsultaAsync(ConsultaRequestDto request)
@@ -32,7 +37,9 @@ public class ChatServicioImpl : IChatServicio
         try
         {
             // 1) Contexto desde embeddings + índice en memoria
+            var reloj = Stopwatch.StartNew();
             var contextos = await _contextRetriever.ObtenerContextoAsync(request.Consulta);
+            var msContexto = reloj.ElapsedMilliseconds;
 
             if (contextos.Count == 0)
             {
@@ -41,8 +48,10 @@ public class ChatServicioImpl : IChatServicio
                 return Ok(sinInfo, 0);
             }
 
-            // 2) Prompt con contexto recuperado
-            var basePrompt = _promptBuilder.Construir(request.Consulta, contextos);
+            // 2) Presupuesto de contexto (Rag:ContextoMaxCaracteres). Antes solo lo aplicaba RagEngine, que este flujo
+            //    no usa: con TopK 5 y vecinos el prompt podía llegar a ~13 000 caracteres en lugar de 3 500.
+            var usados = _promptBuilder.SeleccionarContexto(contextos);
+            var basePrompt = _promptBuilder.Construir(request.Consulta, usados);
 
             // 3) Adjuntar modo de modelo (rapido | preciso | null)
             var prompt = new ChatPrompt(
@@ -51,7 +60,13 @@ public class ChatServicioImpl : IChatServicio
                 NormalizarModo(request.ModoModelo));
 
             // 4) LLM (Ollama)
+            reloj.Restart();
             var result = await _chat.GenerarAsync(prompt);
+
+            _log.LogInformation(
+                "Chat: contexto {MsCtx} ms ({Usados}/{Recuperados} fragmentos, {Car} car.) | modelo {MsLlm} ms | modo {Modo}",
+                msContexto, usados.Count, contextos.Count, usados.Sum(u => u.Texto.Length),
+                reloj.ElapsedMilliseconds, prompt.ModoModelo ?? "(defecto)");
 
             string texto;
             if (result.Exito && !string.IsNullOrWhiteSpace(result.Respuesta))

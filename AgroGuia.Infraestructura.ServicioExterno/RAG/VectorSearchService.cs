@@ -82,7 +82,7 @@ public sealed class VectorSearchService : IVectorSearchService
         }
 
         var terminos = TextoUtil.Tokenizar(pregunta).Distinct().ToList();
-        var bm25 = Bm25Sobre(chunks, snap.Df, snap.LongitudPromedio, terminos);
+        var bm25 = Bm25Sobre(chunks, snap.Df, snap.Chunks.Count, snap.LongitudPromedio, terminos);
 
         int c = _opt.CandidatosPorRanking;
         var rankVec = cos is null
@@ -150,6 +150,7 @@ public sealed class VectorSearchService : IVectorSearchService
     private static double[] Bm25Sobre(
         IReadOnlyList<IndexedChunk> chunks,
         IReadOnlyDictionary<string, int> dfGlobal,
+        int totalGlobal,
         double longitudPromedio,
         IReadOnlyList<string> terminos)
     {
@@ -157,14 +158,14 @@ public sealed class VectorSearchService : IVectorSearchService
         if (terminos.Count == 0) return scores;
 
         const double k1 = 1.2, b = 0.75;
-        double total = Math.Max(1, dfGlobal.Count > 0 ? chunks.Count : chunks.Count);
 
         foreach (var t in terminos)
         {
-            // df global del índice completo (mejor IDF); si no existe, se salta
+            // df y N tienen que ser del MISMO corpus (el índice completo). Antes N era el tamaño del subconjunto
+            // filtrado por cultivo: con df global 200 y subconjunto de 50, N = max(50, 200) = 200 y el IDF
+            // salía ~0.0025 (el término valía casi cero) en vez de ~0.69 con N = 400.
             if (!dfGlobal.TryGetValue(t, out var df) || df <= 0) continue;
-            // Usamos tamaño del corpus completo si está en snap; aquí aproximamos con chunks.Count
-            double N = Math.Max(chunks.Count, df);
+            double N = Math.Max(totalGlobal, df);
             double idf = Math.Log(1 + (N - df + 0.5) / (df + 0.5));
 
             for (int i = 0; i < scores.Length; i++)
@@ -172,28 +173,6 @@ public sealed class VectorSearchService : IVectorSearchService
                 var ch = chunks[i];
                 if (!ch.Tf.TryGetValue(t, out var tf)) continue;
                 double norm = tf + k1 * (1 - b + b * ch.LongitudTokens / Math.Max(1, longitudPromedio));
-                scores[i] += idf * tf * (k1 + 1) / norm;
-            }
-        }
-        return scores;
-    }
-    private static double[] Bm25(VectorIndexSnapshot s, IReadOnlyList<string> terminos)
-    {
-        var scores = new double[s.Chunks.Count];
-        if (terminos.Count == 0) return scores;
-
-        const double k1 = 1.2, b = 0.75;
-        double total = s.Chunks.Count;
-
-        foreach (var t in terminos)
-        {
-            if (!s.Df.TryGetValue(t, out var df)) continue;
-            double idf = Math.Log(1 + (total - df + 0.5) / (df + 0.5));
-            for (int i = 0; i < scores.Length; i++)
-            {
-                var ch = s.Chunks[i];
-                if (!ch.Tf.TryGetValue(t, out var tf)) continue;
-                double norm = tf + k1 * (1 - b + b * ch.LongitudTokens / s.LongitudPromedio);
                 scores[i] += idf * tf * (k1 + 1) / norm;
             }
         }

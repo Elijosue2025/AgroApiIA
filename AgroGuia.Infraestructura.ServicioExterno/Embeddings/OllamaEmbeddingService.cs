@@ -57,7 +57,7 @@ public sealed class OllamaEmbeddingService : IEmbeddingService
         try
         {
             using var resp = await _http.PostAsJsonAsync(
-                "api/embed", new { model = _opt.EmbeddingModel, input = entradas, truncate = true }, ct);
+                "api/embed", new { model = _opt.EmbeddingModel, input = entradas, truncate = true, keep_alive = _opt.KeepAlive }, ct);
 
             if (!resp.IsSuccessStatusCode)
             {
