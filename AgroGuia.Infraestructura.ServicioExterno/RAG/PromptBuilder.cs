@@ -18,20 +18,21 @@ namespace AgroGuia.Infraestructura.ServicioExterno.RAG;
 public sealed class PromptBuilder
 {
     public const string RespuestaSinInformacion =
-        "No encontré esta información en los manuales técnicos disponibles. " +
-        "Te recomiendo consultar con un técnico agrónomo de tu zona, o reformular la pregunta " +
-        "indicando el cultivo, la etapa y el problema.";
+        "No encontré esa información en los manuales técnicos disponibles. " +
+        "Prueba a indicar el cultivo, la plaga o el problema con más detalle, " +
+        "o consulta con un técnico agrónomo de tu zona.";
+
+    public const string RespuestaErrorAsistente =
+        "El asistente no está disponible en este momento. Intenta de nuevo en unos minutos.";
 
     private const string Sistema = """
-        Eres AgroGuia IA, asesor agronómico para agricultores de la Sierra Norte del Ecuador (Carchi).
-        Reglas:
-        1. Responde en español sencillo y práctico, sin saludos ni elogios a la pregunta.
-        2. Usa SOLO la información del CONTEXTO. No uses conocimiento general.
-        3. Cada dato debe salir de un fragmento: cita su número al final, por ejemplo [2].
-        4. Nunca inventes nombres de plagas, enfermedades, productos, dosis, fechas ni cifras. Si un nombre no aparece en el CONTEXTO, no lo menciones.
-        5. Si el CONTEXTO responde solo una parte, responde esa parte e indica qué falta. Si no responde nada, di: "No encontré esta información en los manuales disponibles."
-        6. Si el usuario afirma algo que contradice el CONTEXTO, no le des la razón: indica lo que dice el CONTEXTO.
-        """;
+Eres AgroGuía IA, asistente agronómico.
+Responde solo con el CONTEXTO. No inventes plagas, productos ni dosis.
+Si preguntan por un cultivo o plaga concreta, céntrate en eso.
+Español claro y natural. Sintetiza; no copies ni repitas.
+Si hay control: monitoreo, cultural, biológico y productos solo si están en el contexto.
+Si no alcanza el contexto, dilo en una frase. Sin saludos ni relleno.
+""";
 
     private readonly RagOptions _opt;
     public PromptBuilder(IOptions<RagOptions> opt) => _opt = opt.Value;
@@ -55,19 +56,19 @@ public sealed class PromptBuilder
         for (int i = 0; i < contextos.Count; i++)
         {
             var c = contextos[i];
-            sb.Append('[').Append(i + 1).Append("] Manual: ").Append(c.Titulo);
-            if (!string.IsNullOrWhiteSpace(c.Seccion)) sb.Append(" | Sección: ").Append(c.Seccion);
+            sb.Append('[').Append(i + 1).Append("] ").Append(c.Titulo);
+            if (!string.IsNullOrWhiteSpace(c.Seccion)) sb.Append(" | ").Append(c.Seccion);
             if (c.Pagina is not null) sb.Append(" | pág. ").Append(c.Pagina);
             sb.Append('\n').Append(c.Texto).Append("\n\n");
         }
         sb.Append("PREGUNTA: ").Append(pregunta.Trim())
-          .Append("\n\nResponde usando solo el contexto. Si no alcanza, dilo.");
+          .Append("\n\nResponde usando solo el contexto. Sé concreto y sin repeticiones.");
         return new ChatPrompt(Sistema, sb.ToString());
     }
 
     public string RespuestaExtractiva(IReadOnlyList<ContextoRecuperado> contextos)
     {
-        var sb = new StringBuilder("El asistente no está disponible; esto es lo que dicen los manuales:\n\n");
+        var sb = new StringBuilder("El asistente no pudo generar la respuesta. Esto es lo que indican los manuales:\n\n");
         foreach (var c in contextos.Take(2))
         {
             var t = c.Texto.Length > 600 ? c.Texto[..600].TrimEnd() + "..." : c.Texto;

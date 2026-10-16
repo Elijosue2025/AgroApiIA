@@ -7,5 +7,7 @@
         public long ConversacionId { get; set; }
 
         public string Consulta { get; set; } = string.Empty;
+        // ConsultaRequestDto
+        //public string? ModoModelo { get; set; } // "rapido" | "preciso"
     }
 }
