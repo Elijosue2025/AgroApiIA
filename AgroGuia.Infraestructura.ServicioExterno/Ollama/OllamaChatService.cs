@@ -10,31 +10,17 @@ namespace AgroGuia.Infraestructura.ServicioExterno.Ollama;
 public sealed class OllamaChatService : IChatCompletionService
 {
     private readonly IOllamaApiClient _client;
-    private readonly string _modelName;
+    private readonly OllamaOptions _opt;
     private readonly ILogger<OllamaChatService> _log;
 
-    // Si registras IOllamaApiClient en DI (como en tu ServicioExternoRegistration):
     public OllamaChatService(
         IOllamaApiClient client,
         IOptions<OllamaOptions> options,
         ILogger<OllamaChatService> log)
     {
         _client = client;
-        _modelName = options.Value.ChatModel ?? "llama3.2:3b";
+        _opt = options.Value;
         _log = log;
-
-        if (_client is OllamaApiClient concrete)
-            concrete.SelectedModel = _modelName;
-    }
-
-    // Constructor simple por si aún no inyectas IOllamaApiClient:
-    public OllamaChatService()
-    {
-        var api = new OllamaApiClient(new Uri("http://localhost:11434"));
-        api.SelectedModel = "llama3.2:3b";
-        _client = api;
-        _modelName = "llama3.2:3b";
-        _log = null!;
     }
 
     public async Task<ChatCompletionResult> GenerarAsync(
@@ -52,36 +38,31 @@ public sealed class OllamaChatService : IChatCompletionService
                 };
             }
 
-            // Cliente concreto de OllamaSharp para el helper Chat
-            var apiClient = _client as OllamaApiClient
-                ?? new OllamaApiClient(new Uri("http://localhost:11434"))
-                {
-                    SelectedModel = _modelName
-                };
+            // Elige 3B o 7B según el modo
+            var modelo = ResolverModelo(prompt.ModoModelo);
+            var apiClient = ObtenerApiClient(modelo);
 
-            if (!string.IsNullOrWhiteSpace(_modelName))
-                apiClient.SelectedModel = _modelName;
+            _log.LogInformation(
+                "Ollama chat modelo={Model} modo={Modo}",
+                modelo,
+                prompt.ModoModelo ?? "default");
+
+            // Una sola generación (evita 2 llamadas system + user)
+            var mensaje = string.IsNullOrWhiteSpace(prompt.Sistema)
+                ? prompt.Usuario
+                : $"[Instrucciones]\n{prompt.Sistema}\n\n[Consulta]\n{prompt.Usuario}";
 
             var chat = new Chat(apiClient);
+            var sb = new System.Text.StringBuilder();
 
-            // 1) System
-            if (!string.IsNullOrWhiteSpace(prompt.Sistema))
-            {
-                await foreach (var _ in chat.SendAsAsync(ChatRole.System, prompt.Sistema)
-                    .WithCancellation(ct))
-                { }
-            }
-
-            // 2) User → respuesta
-            var respuesta = new System.Text.StringBuilder();
-            await foreach (var fragmento in chat.SendAsAsync(ChatRole.User, prompt.Usuario)
-                .WithCancellation(ct))
+            await foreach (var fragmento in chat.SendAsync(mensaje).WithCancellation(ct))
             {
                 ct.ThrowIfCancellationRequested();
-                respuesta.Append(fragmento);
+                if (!string.IsNullOrEmpty(fragmento))
+                    sb.Append(fragmento);
             }
 
-            var texto = respuesta.ToString().Trim();
+            var texto = sb.ToString().Trim();
 
             return new ChatCompletionResult
             {
@@ -99,7 +80,7 @@ public sealed class OllamaChatService : IChatCompletionService
         }
         catch (Exception ex)
         {
-            _log?.LogError(ex, "Error consultando Ollama ({Model})", _modelName);
+            _log.LogError(ex, "Error consultando Ollama");
             Console.WriteLine($"[Ollama Error] {ex.Message}");
 
             return new ChatCompletionResult
@@ -109,5 +90,38 @@ public sealed class OllamaChatService : IChatCompletionService
                 Respuesta = "Lo siento, el asistente local no está disponible en este momento."
             };
         }
+    }
+
+    /// <summary>
+    /// rapido  → ChatModelRapido (llama3.2:3b)
+    /// preciso → ChatModelPreciso (qwen2.5:7b)
+    /// null    → ChatModel (por defecto)
+    /// </summary>
+    private string ResolverModelo(string? modo)
+    {
+        if (string.Equals(modo, "rapido", StringComparison.OrdinalIgnoreCase))
+            return _opt.ChatModelRapido ?? "llama3.2:3b";
+
+        if (string.Equals(modo, "preciso", StringComparison.OrdinalIgnoreCase))
+            return _opt.ChatModelPreciso ?? _opt.ChatModel ?? "qwen2.5:7b";
+
+        return _opt.ChatModel ?? "qwen2.5:7b";
+    }
+
+    private OllamaApiClient ObtenerApiClient(string modelo)
+    {
+        if (_client is OllamaApiClient concrete)
+        {
+            concrete.SelectedModel = modelo;
+            return concrete;
+        }
+
+        var baseUrl = string.IsNullOrWhiteSpace(_opt.BaseUrl)
+            ? "http://localhost:11434"
+            : _opt.BaseUrl.TrimEnd('/');
+
+        var api = new OllamaApiClient(new Uri(baseUrl + "/"));
+        api.SelectedModel = modelo;
+        return api;
     }
 }

@@ -32,6 +32,11 @@ Si preguntan por un cultivo o plaga concreta, céntrate en eso.
 Español claro y natural. Sintetiza; no copies ni repitas.
 Si hay control: monitoreo, cultural, biológico y productos solo si están en el contexto.
 Si no alcanza el contexto, dilo en una frase. Sin saludos ni relleno.
+Si la pregunta es específica (una plaga, un producto o un manejo concreto):
+- Desarrolla con más detalle: síntomas, monitoreo, umbrales si existen, pasos de control y precauciones.
+- Usa solo el CONTEXTO; no inventes especies ni dosis.
+- Organiza en párrafos o puntos claros (monitoreo, cultural, biológico, productos del contexto).
+Si la pregunta es general, responde de forma completa pero sin alargarte de más.
 """;
 
     private readonly RagOptions _opt;

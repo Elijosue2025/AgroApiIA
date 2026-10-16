@@ -11,6 +11,7 @@ using OllamaSharp;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
 using AgroGuia.Infraestructura.ServicioExterno.Ollama;
 using OllamaSharp.Models;
+using AgroGuia.Infraestructura.ServicioExterno.Models;
 
 namespace AgroGuia.Infraestructura.ServicioExterno.DependencyInjection;
 
