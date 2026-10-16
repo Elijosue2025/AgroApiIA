@@ -1,5 +1,13 @@
-namespace AgroGuia.Infraestructura.ServicioExterno.Models
+public sealed class ChatPrompt
 {
-    /// <summary>El adaptador de chat solo envía; el prompt lo construye la lógica (PromptBuilder).</summary>
-    public sealed record ChatPrompt(string Sistema, string Usuario);
+    public string Sistema { get; init; } = "";
+    public string Usuario { get; init; } = "";
+    public string? ModoModelo { get; init; }
+
+    public ChatPrompt(string sistema, string usuario, string? modoModelo = null)
+    {
+        Sistema = sistema;
+        Usuario = usuario;
+        ModoModelo = modoModelo;
+    }
 }

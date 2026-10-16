@@ -3,7 +3,10 @@ using AgroGuia.Aplicacion.Servicio;
 using AgroGuia.Dominio.Modelo.Abstracciones;
 using AgroGuia.Dominio.Modelo.Entidades;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
+using AgroGuia.Infraestructura.ServicioExterno.Models;
 using AgroGuia.Infraestructura.ServicioExterno.RAG;
+
+namespace AgroGuia.Aplicacion.ServicioImpl;
 
 public class ChatServicioImpl : IChatServicio
 {
@@ -28,32 +31,48 @@ public class ChatServicioImpl : IChatServicio
     {
         try
         {
-            // 1) Contexto desde embeddings + índice (NO SQL uno a uno)
+            // 1) Contexto desde embeddings + índice en memoria
             var contextos = await _contextRetriever.ObtenerContextoAsync(request.Consulta);
 
             if (contextos.Count == 0)
             {
-                const string sinInfo =
-                    "No encontré información suficiente en los manuales técnicos sobre este tema.";
+                var sinInfo = PromptBuilder.RespuestaSinInformacion;
                 await GuardarParAsync(request, sinInfo, 0);
                 return Ok(sinInfo, 0);
             }
 
-            // 2) Prompt con SOLO contexto recuperado
-            var prompt = _promptBuilder.Construir(request.Consulta, contextos);
-            // (ajusta el nombre del método a como esté en tu PromptBuilder)
+            // 2) Prompt con contexto recuperado
+            var basePrompt = _promptBuilder.Construir(request.Consulta, contextos);
 
-            // 3) LLM (Ollama por defecto)
+            // 3) Adjuntar modo de modelo (rapido | preciso | null)
+            var prompt = new ChatPrompt(
+                basePrompt.Sistema,
+                basePrompt.Usuario,
+                NormalizarModo(request.ModoModelo));
+
+            // 4) LLM (Ollama)
             var result = await _chat.GenerarAsync(prompt);
 
-            var texto = result.Exito && !string.IsNullOrWhiteSpace(result.Respuesta)
-                ? result.Respuesta
-                : "No encontré información suficiente en los manuales técnicos sobre este tema.";
+            string texto;
+            if (result.Exito && !string.IsNullOrWhiteSpace(result.Respuesta))
+            {
+                texto = result.Respuesta.Trim();
+            }
+            else
+            {
+                // No guardar un fallo del modelo como si fuera respuesta válida del manual
+                texto = string.IsNullOrWhiteSpace(result.ErrorMensaje)
+                    ? PromptBuilder.RespuestaSinInformacion
+                    : "El asistente no pudo generar la respuesta. Intenta de nuevo o usa el modo Rápido.";
+            }
 
             var tokens = result.TokensEntrada + result.TokensSalida;
-            await GuardarParAsync(request, texto, tokens);
 
-            return Ok(texto, tokens, result.ErrorMensaje);
+            // Solo persistimos si hubo respuesta usable
+            if (result.Exito)
+                await GuardarParAsync(request, texto, tokens);
+
+            return Ok(texto, tokens, result.Exito ? null : result.ErrorMensaje);
         }
         catch (Exception ex)
         {
@@ -62,9 +81,19 @@ public class ChatServicioImpl : IChatServicio
             {
                 Exito = false,
                 Respuesta = "Lo siento, ocurrió un error interno al procesar tu consulta.",
+                TokensUsados = 0,
+                FechaRespuesta = DateTime.UtcNow,
                 ErrorMensaje = ex.Message
             };
         }
+    }
+
+    private static string? NormalizarModo(string? modo)
+    {
+        if (string.IsNullOrWhiteSpace(modo)) return null;
+
+        modo = modo.Trim().ToLowerInvariant();
+        return modo is "rapido" or "preciso" ? modo : null;
     }
 
     private static ChatResponseDto Ok(string respuesta, int tokens, string? error = null) => new()
@@ -85,6 +114,7 @@ public class ChatServicioImpl : IChatServicio
             Contenido = request.Consulta,
             Fecha = DateTime.UtcNow
         });
+
         await _conversacionRepositorio.MensajeGuardarAsync(new Mensajes
         {
             ConversacionId = request.ConversacionId,
