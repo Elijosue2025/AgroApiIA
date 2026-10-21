@@ -10,6 +10,8 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
     <PackageReference Include="OllamaSharp" Version="5.4.25" />
+    <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" />
     <PackageReference Include="PdfPig" Version="0.1.14" />
     <PackageReference Include="PDFsharp" Version="6.2.4" />
     <PackageReference Include="VectorSharp.Embedding.NomicEmbed" Version="1.0.3" />

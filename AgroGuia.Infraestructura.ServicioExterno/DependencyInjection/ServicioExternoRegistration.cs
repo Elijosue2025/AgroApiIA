@@ -71,6 +71,9 @@ public static class ServicioExternoRegistration
         services.AddScoped<ContextRetriever>();
         services.AddScoped<IRAGEngine, RagEngine>();
 
+        // ---- Visión por computador (OpenCV): reconocimiento de plagas y enfermedades ----
+        services.AddVisionOpenCv(configuration);
+
         return services;
     }
 }

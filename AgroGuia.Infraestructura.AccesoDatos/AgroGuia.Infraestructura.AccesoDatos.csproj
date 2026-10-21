@@ -13,6 +13,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Primitives" Version="10.0.8" />
+    <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
     <PackageReference Include="VectorSharp.Embedding.NomicEmbed" Version="1.0.3" />
   </ItemGroup>
 
