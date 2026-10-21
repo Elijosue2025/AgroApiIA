@@ -25,7 +25,12 @@
 
   <ItemGroup>
     <Folder Include="Middlewares\" />
-    <Folder Include="ModelosVision\" />
+	  <None Update="ModelosVision\**\*">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  </None>
+	  <Content Update="ModelosVision\**\*">
+		  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	  </Content>
   </ItemGroup>
 
 </Project>

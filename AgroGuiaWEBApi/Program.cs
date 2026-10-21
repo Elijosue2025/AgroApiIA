@@ -111,7 +111,10 @@ builder.Services.AddScoped<IJwtService, JwtServiceImpl>();
 
 // ==================== OLLAMA / RAG / EMBEDDINGS ====================
 builder.Services.AddServicioExterno(builder.Configuration);
-
+// ==================== Vision ====================
+builder.Services.AddScoped<IRAGServicio, RAGServicioImpl>();
+builder.Services.AddScoped<IDiagnosticoServicio, DiagnosticoServicioImpl>();   // <-- NUEVA
+builder.Services.AddScoped<IJwtService, JwtServiceImpl>();
 // ==================== APP ====================
 var app = builder.Build();
 
@@ -141,6 +144,22 @@ _ = Task.Run(async () =>
     catch (Exception ex)
     {
         Console.WriteLine($"[RAG] Precarga falló: {ex.Message}");
+    }
+});
+// Precarga del modelo de visión (OpenCV/ONNX). Si no hay modelo la API funciona igual: solo se avisa.
+_ = Task.Run(() =>
+{
+    try
+    {
+        var vision = app.Services.GetRequiredService<IAnalizadorVision>();
+        var estado = vision.ObtenerEstado();
+        Console.WriteLine(estado.ModeloDisponible
+            ? $"[Vision] Modelo '{estado.Modelo}' cargado ({estado.NumeroEtiquetas} clases)."
+            : $"[Vision] Sin modelo de reconocimiento: {estado.Detalle}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Vision] Precarga falló: {ex.Message}");
     }
 });
 
