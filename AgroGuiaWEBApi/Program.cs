@@ -98,8 +98,8 @@ builder.Services.AddSwaggerGen(c =>
 // ==================== REPOSITORIOS ====================
 builder.Services.AddScoped<IUsuarioRepositorio, UsuarioRepositorioImpl>();
 builder.Services.AddScoped<IConversacionRepositorio, ConversacionRepositorioImpl>();
-builder.Services.AddScoped<IMensajeRepositorio, MensajeRepositorioImpl>();
 builder.Services.AddScoped<IEmbeddingRepositorio, EmbeddingRepositorioImpl>();
+// NO registrar IMensajeRepositorio si ya no lo usas
 
 // ==================== SERVICIOS ====================
 builder.Services.AddScoped<IAuthServicio, AuthServicioImpl>();
@@ -108,6 +108,9 @@ builder.Services.AddScoped<IConversacionServicio, ConversacionServicioImpl>();
 builder.Services.AddScoped<IChatServicio, ChatServicioImpl>();
 builder.Services.AddScoped<IRAGServicio, RAGServicioImpl>();
 builder.Services.AddScoped<IJwtService, JwtServiceImpl>();
+builder.Services.AddScoped<IDiagnosticoServicio, DiagnosticoServicioImpl>();
+
+builder.Services.AddServicioExterno(builder.Configuration);
 
 // ==================== OLLAMA / RAG / EMBEDDINGS ====================
 builder.Services.AddServicioExterno(builder.Configuration);

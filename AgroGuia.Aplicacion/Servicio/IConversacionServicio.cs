@@ -1,12 +1,10 @@
 ﻿using AgroGuia.Aplicacion.DTO.DTOS.Chat;
 using AgroGuia.Aplicacion.DTO.DTOS.Conversaciones;
-using AgroGuia.Dominio.Modelo.Entidades;
 
 namespace AgroGuia.Aplicacion.Servicio;
 
 public interface IConversacionServicio
 {
-    // ===== API nueva (gestión completa) =====
     Task<ConversacionResumenDto> CrearAsync(long usuarioId, string? titulo);
     Task<IReadOnlyList<ConversacionResumenDto>> ListarMiasAsync(long usuarioId);
     Task<ConversacionDetalleDto?> ObtenerMiaAsync(long usuarioId, long conversacionId);
@@ -16,8 +14,7 @@ public interface IConversacionServicio
     Task<IReadOnlyList<ConversacionResumenDto>> AdminListarAsync(
         long? filtroUsuarioId, DateTime? desde, DateTime? hasta, string? q, int take = 50);
 
-    // ===== Compatibilidad (lo que ya tienes en el controller) =====
+    // Compatibilidad con ConversacionController / ChatController actuales
     Task<ConversacionDTO> CrearConversacionAsync(long usuarioId, string titulo);
     Task<List<ConversacionDTO>> ObtenerConversacionesUsuarioAsync(long usuarioId);
-
 }

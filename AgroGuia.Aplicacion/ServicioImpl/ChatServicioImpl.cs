@@ -143,34 +143,13 @@ public class ChatServicioImpl : IChatServicio
         if (conversacionId <= 0)
             return Array.Empty<Mensajes>();
 
-        try
-        {
-            // Puerto nuevo (si ya lo implementaste)
-            var list = await _conversacionRepositorio.ListarMensajesAsync(conversacionId, take: 50);
-            return list
-                .OrderBy(m => m.Fecha)
-                .TakeLast(MaxTurnosHistorial)
-                .ToList();
-        }
-        catch (Exception)
-        {
-            // Fallback legacy
-            try
-            {
-                var conv = await _conversacionRepositorio.ConversacionObtenerConMensajesAsync(conversacionId);
-                if (conv?.Mensajes == null) return Array.Empty<Mensajes>();
-                return conv.Mensajes
-                    .OrderBy(m => m.Fecha)
-                    .TakeLast(MaxTurnosHistorial)
-                    .ToList();
-            }
-            catch
-            {
-                return Array.Empty<Mensajes>();
-            }
-        }
-    }
+        var list = await _conversacionRepositorio.ListarMensajesAsync(conversacionId, take: 50);
 
+        return list
+            .OrderBy(m => m.Fecha)
+            .TakeLast(MaxTurnosHistorial)
+            .ToList();
+    }
     private static string? FormatearHistorial(IReadOnlyList<Mensajes> previos)
     {
         if (previos.Count == 0) return null;
