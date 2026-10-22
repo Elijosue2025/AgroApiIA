@@ -4,7 +4,7 @@ namespace AgroGuia.Dominio.Modelo.Abstracciones;
 
 public interface IConversacionRepositorio
 {
-    // ===== Gestión de conversaciones (chat tipo ChatGPT) =====
+    // Gestión de conversaciones
     Task<Conversaciones> CrearAsync(Conversaciones entidad);
     Task<Conversaciones?> ObtenerPorIdAsync(long id);
     Task<IReadOnlyList<Conversaciones>> ListarPorUsuarioAsync(long usuarioId, bool soloActivas = true);
@@ -14,16 +14,15 @@ public interface IConversacionRepositorio
     Task<IReadOnlyList<Conversaciones>> AdminListarAsync(
         long? usuarioId, DateTime? desde, DateTime? hasta, string? tituloContiene, int take = 50);
 
-    // ===== Lo que YA usa el chat / mensajes =====
+    // Mensajes (una sola vez)
     Task MensajeGuardarAsync(Mensajes mensaje);
 
-    // ===== Legacy (opcional: mantener hasta migrar el servicio) =====
+    // Legacy (una sola vez cada uno)
     Task<Conversaciones> ConversacionCrearAsync(long usuarioId, string titulo);
     Task<Conversaciones?> ConversacionObtenerConMensajesAsync(long id);
     Task<List<Conversaciones>> ConversacionObtenerPorUsuarioAsync(long usuarioId);
 
-    // ===== Chunks: mejor moverlos a IEmbeddingRepositorio a medio plazo =====
-    // Si aún los usa ChatServicioImpl o el repo, déjalos por ahora:
+    // Chunks (si aún los usa el repo)
     Task<List<string>> ChunksBuscarRelevantesAsync(string consulta, int topK = 4);
     Task<List<string>> BuscarChunksRelevantesAsync(string preguntaUsuario);
 }

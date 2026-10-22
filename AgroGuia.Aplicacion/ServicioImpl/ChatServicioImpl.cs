@@ -1,4 +1,7 @@
-﻿using System.Diagnostics;
+﻿// AgroGuia.Aplicacion/ServicioImpl/ChatServicioImpl.cs
+using System.Diagnostics;
+using System.Text;
+using System.Text.RegularExpressions;
 using AgroGuia.Aplicacion.DTO.DTOS.Chat;
 using AgroGuia.Aplicacion.Servicio;
 using AgroGuia.Dominio.Modelo.Abstracciones;
@@ -12,11 +15,22 @@ namespace AgroGuia.Aplicacion.ServicioImpl;
 
 public class ChatServicioImpl : IChatServicio
 {
+    private const int MaxTurnosHistorial = 8; // 8 mensajes ≈ 4 pares user/assistant
+    private const int MaxCharsHistorial = 1800;
+
     private readonly ContextRetriever _contextRetriever;
     private readonly PromptBuilder _promptBuilder;
     private readonly IChatCompletionService _chat;
     private readonly IConversacionRepositorio _conversacionRepositorio;
     private readonly ILogger<ChatServicioImpl> _log;
+
+    // Cultivos frecuentes (amplía según tu catálogo)
+    private static readonly string[] CultivosConocidos =
+    {
+        "quinua", "quinoa", "papa", "maíz", "maiz", "frejol", "fréjol", "frijol",
+        "trigo", "cebada", "haba", "arveja", "ulluco", "oca", "mashua", "tomate",
+        "cebolla", "ajo", "lenteja", "chocho", "amaranto"
+    };
 
     public ChatServicioImpl(
         ContextRetriever contextRetriever,
@@ -36,9 +50,28 @@ public class ChatServicioImpl : IChatServicio
     {
         try
         {
-            // 1) Contexto desde embeddings + índice en memoria
+            if (string.IsNullOrWhiteSpace(request.Consulta))
+            {
+                return new ChatResponseDto
+                {
+                    Exito = false,
+                    Respuesta = "Escribe una consulta agronómica.",
+                    FechaRespuesta = DateTime.UtcNow
+                };
+            }
+
+            // ----- 0) Historial de ESTA conversación -----
+            var previos = await CargarMensajesPreviosAsync(request.ConversacionId);
+            var historialTexto = FormatearHistorial(previos);
+            var consultaRag = AmpliarConsultaParaRag(request.Consulta, previos);
+
+            _log.LogInformation(
+                "Hilo conv={Id}: historial={N} msgs | ragQuery=\"{Q}\"",
+                request.ConversacionId, previos.Count, consultaRag);
+
+            // ----- 1) RAG con consulta ampliada (mantiene cultivo/tema del hilo) -----
             var reloj = Stopwatch.StartNew();
-            var contextos = await _contextRetriever.ObtenerContextoAsync(request.Consulta);
+            var contextos = await _contextRetriever.ObtenerContextoAsync(consultaRag);
             var msContexto = reloj.ElapsedMilliseconds;
 
             if (contextos.Count == 0)
@@ -48,24 +81,22 @@ public class ChatServicioImpl : IChatServicio
                 return Ok(sinInfo, 0);
             }
 
-            // 2) Presupuesto de contexto (Rag:ContextoMaxCaracteres). Antes solo lo aplicaba RagEngine, que este flujo
-            //    no usa: con TopK 5 y vecinos el prompt podía llegar a ~13 000 caracteres en lugar de 3 500.
+            // ----- 2) Prompt = historial + contexto + pregunta actual -----
             var usados = _promptBuilder.SeleccionarContexto(contextos);
-            var basePrompt = _promptBuilder.Construir(request.Consulta, usados);
+            var basePrompt = _promptBuilder.Construir(request.Consulta.Trim(), usados, historialTexto);
 
-            // 3) Adjuntar modo de modelo (rapido | preciso | null)
             var prompt = new ChatPrompt(
                 basePrompt.Sistema,
                 basePrompt.Usuario,
                 NormalizarModo(request.ModoModelo));
 
-            // 4) LLM (Ollama)
+            // ----- 3) LLM -----
             reloj.Restart();
             var result = await _chat.GenerarAsync(prompt);
 
             _log.LogInformation(
-                "Chat: contexto {MsCtx} ms ({Usados}/{Recuperados} fragmentos, {Car} car.) | modelo {MsLlm} ms | modo {Modo}",
-                msContexto, usados.Count, contextos.Count, usados.Sum(u => u.Texto.Length),
+                "Chat: contexto {MsCtx} ms ({Usados}/{Recuperados} frag.) | modelo {MsLlm} ms | modo {Modo}",
+                msContexto, usados.Count, contextos.Count,
                 reloj.ElapsedMilliseconds, prompt.ModoModelo ?? "(defecto)");
 
             string texto;
@@ -75,23 +106,23 @@ public class ChatServicioImpl : IChatServicio
             }
             else
             {
-                // No guardar un fallo del modelo como si fuera respuesta válida del manual
                 texto = string.IsNullOrWhiteSpace(result.ErrorMensaje)
                     ? PromptBuilder.RespuestaSinInformacion
                     : "El asistente no pudo generar la respuesta. Intenta de nuevo o usa el modo Rápido.";
             }
 
             var tokens = result.TokensEntrada + result.TokensSalida;
-
-            // Solo persistimos si hubo respuesta usable
             if (result.Exito)
                 await GuardarParAsync(request, texto, tokens);
+
+            // Opcional: persistir cultivo del hilo si la entidad/repo lo soportan
+            await IntentarActualizarCultivoHiloAsync(request.ConversacionId, request.Consulta, previos);
 
             return Ok(texto, tokens, result.Exito ? null : result.ErrorMensaje);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ERROR ChatServicio] {ex.Message}");
+            _log.LogError(ex, "Error en ChatServicio");
             return new ChatResponseDto
             {
                 Exito = false,
@@ -103,10 +134,179 @@ public class ChatServicioImpl : IChatServicio
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Historial
+    // -------------------------------------------------------------------------
+
+    private async Task<IReadOnlyList<Mensajes>> CargarMensajesPreviosAsync(long conversacionId)
+    {
+        if (conversacionId <= 0)
+            return Array.Empty<Mensajes>();
+
+        try
+        {
+            // Puerto nuevo (si ya lo implementaste)
+            var list = await _conversacionRepositorio.ListarMensajesAsync(conversacionId, take: 50);
+            return list
+                .OrderBy(m => m.Fecha)
+                .TakeLast(MaxTurnosHistorial)
+                .ToList();
+        }
+        catch (Exception)
+        {
+            // Fallback legacy
+            try
+            {
+                var conv = await _conversacionRepositorio.ConversacionObtenerConMensajesAsync(conversacionId);
+                if (conv?.Mensajes == null) return Array.Empty<Mensajes>();
+                return conv.Mensajes
+                    .OrderBy(m => m.Fecha)
+                    .TakeLast(MaxTurnosHistorial)
+                    .ToList();
+            }
+            catch
+            {
+                return Array.Empty<Mensajes>();
+            }
+        }
+    }
+
+    private static string? FormatearHistorial(IReadOnlyList<Mensajes> previos)
+    {
+        if (previos.Count == 0) return null;
+
+        var sb = new StringBuilder();
+        foreach (var m in previos)
+        {
+            var rol = string.Equals(m.Rol, "user", StringComparison.OrdinalIgnoreCase)
+                ? "Usuario"
+                : "Asistente";
+            var contenido = (m.Contenido ?? "").Trim();
+            if (contenido.Length > 400)
+                contenido = contenido[..400].TrimEnd() + "…";
+            sb.Append(rol).Append(": ").Append(contenido).Append('\n');
+        }
+
+        var texto = sb.ToString();
+        if (texto.Length > MaxCharsHistorial)
+            texto = texto[^MaxCharsHistorial..]; // cola del hilo (lo más reciente)
+
+        return texto;
+    }
+
+    /// <summary>
+    /// Si la pregunta es corta / seguimiento, añade cultivo y pistas del historial
+    /// para que el RAG no busque solo "más métodos".
+    /// </summary>
+    private static string AmpliarConsultaParaRag(string preguntaActual, IReadOnlyList<Mensajes> previos)
+    {
+        var q = preguntaActual.Trim();
+        if (previos.Count == 0) return q;
+
+        var cultivoEnPregunta = DetectarCultivo(q);
+        var cultivoHilo = cultivoEnPregunta
+            ?? DetectarCultivoEnMensajes(previos)
+            ?? "";
+
+        var esSeguimiento = PareceSeguimiento(q) || cultivoEnPregunta is null;
+
+        if (!esSeguimiento && cultivoEnPregunta is not null)
+            return q; // pregunta nueva ya explícita
+
+        // Últimas preguntas del usuario (pistas: trips, jabón, siembra…)
+        var pistas = previos
+            .Where(m => string.Equals(m.Rol, "user", StringComparison.OrdinalIgnoreCase))
+            .Select(m => m.Contenido ?? "")
+            .Reverse()
+            .Take(3)
+            .ToList();
+
+        var extra = new StringBuilder(q);
+        if (!string.IsNullOrEmpty(cultivoHilo) &&
+            q.IndexOf(cultivoHilo, StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            extra.Append(' ').Append(cultivoHilo);
+        }
+
+        // Añade 1–2 frases previas del user si el mensaje actual es muy corto
+        if (q.Length < 80 || PareceSeguimiento(q))
+        {
+            foreach (var p in pistas)
+            {
+                if (string.IsNullOrWhiteSpace(p)) continue;
+                if (p.Equals(q, StringComparison.OrdinalIgnoreCase)) continue;
+                extra.Append(' ').Append(p.Length > 120 ? p[..120] : p);
+                break; // una pista basta para no ensuciar el embed
+            }
+        }
+
+        return Regex.Replace(extra.ToString(), @"\s+", " ").Trim();
+    }
+
+    private static bool PareceSeguimiento(string q)
+    {
+        var t = q.Trim().ToLowerInvariant();
+        if (t.Length <= 48) return true;
+        return t.StartsWith("y ") || t.StartsWith("y el") || t.StartsWith("y la")
+            || t.StartsWith("más ") || t.StartsWith("mas ")
+            || t.Contains("otro método") || t.Contains("otros metodos")
+            || t.Contains("más métodos") || t.Contains("mas metodos")
+            || t.StartsWith("eso") || t.StartsWith("y si")
+            || t.Contains("también") || t.Contains("tambien");
+    }
+
+    private static string? DetectarCultivo(string texto)
+    {
+        var t = texto.ToLowerInvariant();
+        foreach (var c in CultivosConocidos)
+            if (t.Contains(c)) return c is "quinoa" ? "quinua" : c is "maiz" ? "maíz" : c;
+        return null;
+    }
+
+    private static string? DetectarCultivoEnMensajes(IReadOnlyList<Mensajes> msgs)
+    {
+        for (int i = msgs.Count - 1; i >= 0; i--)
+        {
+            if (!string.Equals(msgs[i].Rol, "user", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var c = DetectarCultivo(msgs[i].Contenido ?? "");
+            if (c is not null) return c;
+        }
+        return null;
+    }
+
+    private async Task IntentarActualizarCultivoHiloAsync(
+        long conversacionId, string pregunta, IReadOnlyList<Mensajes> previos)
+    {
+        if (conversacionId <= 0) return;
+        var cultivo = DetectarCultivo(pregunta) ?? DetectarCultivoEnMensajes(previos);
+        if (cultivo is null) return;
+
+        try
+        {
+            var conv = await _conversacionRepositorio.ObtenerPorIdAsync(conversacionId);
+            if (conv is null) return;
+            // Solo si la entidad tiene la propiedad (tras ALTER TABLE)
+            var prop = conv.GetType().GetProperty("CultivoActual");
+            if (prop is null || !prop.CanWrite) return;
+            var actual = prop.GetValue(conv) as string;
+            if (string.Equals(actual, cultivo, StringComparison.OrdinalIgnoreCase)) return;
+            prop.SetValue(conv, cultivo);
+            await _conversacionRepositorio.ActualizarAsync(conv);
+        }
+        catch
+        {
+            // Sin columna o sin método: se ignora; el hilo igual usa historial en memoria de la petición
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Persistencia / helpers
+    // -------------------------------------------------------------------------
+
     private static string? NormalizarModo(string? modo)
     {
         if (string.IsNullOrWhiteSpace(modo)) return null;
-
         modo = modo.Trim().ToLowerInvariant();
         return modo is "rapido" or "preciso" ? modo : null;
     }

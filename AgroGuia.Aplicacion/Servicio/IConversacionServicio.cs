@@ -1,5 +1,6 @@
 ﻿using AgroGuia.Aplicacion.DTO.DTOS.Chat;
 using AgroGuia.Aplicacion.DTO.DTOS.Conversaciones;
+using AgroGuia.Dominio.Modelo.Entidades;
 
 namespace AgroGuia.Aplicacion.Servicio;
 
@@ -18,4 +19,5 @@ public interface IConversacionServicio
     // ===== Compatibilidad (lo que ya tienes en el controller) =====
     Task<ConversacionDTO> CrearConversacionAsync(long usuarioId, string titulo);
     Task<List<ConversacionDTO>> ObtenerConversacionesUsuarioAsync(long usuarioId);
+
 }
