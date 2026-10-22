@@ -22,4 +22,5 @@ public partial class Conversaciones
     public virtual ICollection<Mensajes> Mensajes { get; set; } = new List<Mensajes>();
 
     public virtual Usuarios Usuario { get; set; }
+    public string CultivoActual { get; set; }
 }

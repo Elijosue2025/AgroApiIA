@@ -1,49 +1,54 @@
-﻿using AgroGuia.Aplicacion.DTO.DTOS.Conversaciones;
+﻿using AgroGuia.Aplicacion.DTO.DTOS.Chat;
+using AgroGuia.Aplicacion.DTO.DTOS.Conversaciones;
 using AgroGuia.Aplicacion.Servicio;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using OpenCvSharp;
+using System.Security.Claims;
 
-namespace AgroGuiaWEBApi.Controllers
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class ConversacionController : ControllerBase
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    [Authorize]
-    public class ConversacionController : ControllerBase
+    private readonly IConversacionServicio _svc;
+    public ConversacionController(IConversacionServicio svc) => _svc = svc;
+
+    long Uid() => long.Parse(
+        User.FindFirstValue(ClaimTypes.NameIdentifier)
+        ?? throw new UnauthorizedAccessException());
+
+    [HttpPost]
+    public async Task<IActionResult> Crear([FromBody] CrearConversacionRequestDto? body)
     {
-        private readonly IConversacionServicio _conversacionServicio;
-
-        public ConversacionController(IConversacionServicio conversacionServicio)
-        {
-            _conversacionServicio = conversacionServicio;
-        }
-
-        [HttpPost("crear")]
-        public async Task<IActionResult> Crear([FromBody] CrearConversacionRequestDto request)
-        {
-            if (request?.UsuarioId <= 0)
-                return BadRequest(new { error = "UsuarioId es requerido." });
-
-            try
-            {
-                var conversacion = await _conversacionServicio
-                    .CrearConversacionAsync(request.UsuarioId, request.Titulo ?? "Nueva Consulta Agronómica");
-
-                return Ok(conversacion);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { error = ex.Message });
-            }
-        }
-
-        [HttpGet("usuario/{usuarioId}")]
-        public async Task<IActionResult> ObtenerPorUsuario(long usuarioId)
-        {
-            if (usuarioId <= 0)
-                return BadRequest(new { error = "UsuarioId inválido." });
-
-            var lista = await _conversacionServicio.ObtenerConversacionesUsuarioAsync(usuarioId);
-            return Ok(lista);
-        }
+        var c = await _svc.CrearAsync(Uid(), body?.Titulo);
+        return Ok(c);
     }
+
+    [HttpGet]
+    public async Task<IActionResult> Mias()
+        => Ok(await _svc.ListarMiasAsync(Uid()));
+
+    [HttpGet("{id:long}")]
+    public async Task<IActionResult> Detalle(long id)
+    {
+        var d = await _svc.ObtenerMiaAsync(Uid(), id);
+        return d is null ? NotFound() : Ok(d);
+    }
+
+    [HttpGet("{id:long}/mensajes")]
+    public async Task<IActionResult> Mensajes(long id)
+        => Ok(await _svc.MensajesMiosAsync(Uid(), id));
+
+    [HttpPatch("{id:long}")]
+    public async Task<IActionResult> Renombrar(long id, [FromBody] ActualizarConversacionDto body)
+    {
+        if (string.IsNullOrWhiteSpace(body.Titulo)) return BadRequest();
+        var ok = await _svc.RenombrarMiaAsync(Uid(), id, body.Titulo.Trim());
+        return ok ? NoContent() : NotFound();
+    }
+
+    [HttpDelete("{id:long}")]
+    public async Task<IActionResult> Eliminar(long id)
+        => await _svc.EliminarMiaAsync(Uid(), id) ? NoContent() : NotFound();
 }
