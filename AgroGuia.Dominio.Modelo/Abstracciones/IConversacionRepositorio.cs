@@ -10,6 +10,7 @@ public interface IConversacionRepositorio
     Task<IReadOnlyList<Mensajes>> ListarMensajesAsync(long conversacionId, int take = 200);
     Task ActualizarAsync(Conversaciones entidad);
 
+
     Task<IReadOnlyList<Conversaciones>> AdminListarAsync(
         long? usuarioId,
         DateTime? desde,

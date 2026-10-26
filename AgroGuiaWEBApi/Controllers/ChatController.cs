@@ -1,5 +1,6 @@
 ﻿using AgroGuia.Aplicacion.DTO.DTOS.Chat;
 using AgroGuia.Aplicacion.Servicio;
+using AgroGuiaWEBApi.Extensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,21 +22,24 @@ public class ChatController : ControllerBase
         _conversacionServicio = conversacionServicio;
     }
 
-    /// <summary>POST /api/Chat/consultar</summary>
     [HttpPost("consultar")]
     public async Task<IActionResult> Consultar([FromBody] ConsultaRequestDto request)
     {
         if (request == null || string.IsNullOrWhiteSpace(request.Consulta))
             return BadRequest(new { error = "La consulta es obligatoria." });
 
-        if (request.UsuarioId <= 0)
-            return BadRequest(new { error = "UsuarioId inválido." });
+        var uid = User.GetUserId();      // del token, no del body
+        request.UsuarioId = uid;
 
         if (request.ConversacionId <= 0)
         {
             var nueva = await _conversacionServicio
-                .CrearConversacionAsync(request.UsuarioId, "Nueva Consulta Agronómica");
+                .CrearConversacionAsync(uid, "Nueva Consulta Agronómica");
             request.ConversacionId = nueva.Id;
+        }
+        else if (await _conversacionServicio.ObtenerMiaAsync(uid, request.ConversacionId) is null)
+        {
+            return NotFound(new { error = "Conversación no encontrada." });
         }
 
         var respuesta = await _chatServicio.ProcesarConsultaAsync(request);

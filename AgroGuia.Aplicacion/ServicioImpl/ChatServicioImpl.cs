@@ -255,29 +255,36 @@ public class ChatServicioImpl : IChatServicio
     }
 
     private async Task IntentarActualizarCultivoHiloAsync(
-        long conversacionId, string pregunta, IReadOnlyList<Mensajes> previos)
+    long conversacionId, string pregunta, IReadOnlyList<Mensajes> previos)
     {
         if (conversacionId <= 0) return;
+
         var cultivo = DetectarCultivo(pregunta) ?? DetectarCultivoEnMensajes(previos);
         if (cultivo is null) return;
 
-        try
+        var conv = await _conversacionRepositorio.ObtenerPorIdAsync(conversacionId);
+        if (conv is null) return;
+
+        // Ya tiene el mismo cultivo → no hace falta guardar
+        if (string.Equals(conv.CultivoActual, cultivo, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        conv.CultivoActual = cultivo;
+
+        // Mejora el título solo si sigue siendo el por defecto
+        var tituloActual = (conv.Titulo ?? "").Trim();
+        if (string.IsNullOrEmpty(tituloActual) ||
+            tituloActual.Equals("Nueva consulta", StringComparison.OrdinalIgnoreCase) ||
+            tituloActual.Equals("Nueva Consulta Agronómica", StringComparison.OrdinalIgnoreCase))
         {
-            var conv = await _conversacionRepositorio.ObtenerPorIdAsync(conversacionId);
-            if (conv is null) return;
-            // Solo si la entidad tiene la propiedad (tras ALTER TABLE)
-            var prop = conv.GetType().GetProperty("CultivoActual");
-            if (prop is null || !prop.CanWrite) return;
-            var actual = prop.GetValue(conv) as string;
-            if (string.Equals(actual, cultivo, StringComparison.OrdinalIgnoreCase)) return;
-            prop.SetValue(conv, cultivo);
-            await _conversacionRepositorio.ActualizarAsync(conv);
+            // Primera letra en mayúscula
+            var nombre = char.ToUpper(cultivo[0]) + cultivo[1..];
+            conv.Titulo = $"Consulta sobre {nombre}";
         }
-        catch
-        {
-            // Sin columna o sin método: se ignora; el hilo igual usa historial en memoria de la petición
-        }
+
+        await _conversacionRepositorio.ActualizarAsync(conv);
     }
+    
 
     // -------------------------------------------------------------------------
     // Persistencia / helpers
