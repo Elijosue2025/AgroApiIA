@@ -1,4 +1,6 @@
-﻿using AgroGuia.Aplicacion.DTO.DTOS.Diagnostico;
+﻿using System.Diagnostics;
+using System.Text;
+using AgroGuia.Aplicacion.DTO.DTOS.Diagnostico;
 using AgroGuia.Aplicacion.Servicio;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
 using AgroGuia.Infraestructura.ServicioExterno.Models;
@@ -6,35 +8,47 @@ using AgroGuia.Infraestructura.ServicioExterno.RAG;
 using AgroGuia.Infraestructura.ServicioExterno.Vision;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace AgroGuia.Aplicacion.ServicioImpl;
 
 public class DiagnosticoServicioImpl : IDiagnosticoServicio
 {
-    private const string Advertencia =
-        "Resultado orientativo generado por visión artificial. Confírmalo con un técnico agropecuario " +
-        "antes de aplicar productos fitosanitarios.";
+    private const string AdvertenciaBase =
+        "Resultado orientativo por visión artificial. No sustituye diagnóstico de laboratorio ni de un técnico agrónomo. " +
+        "Confirma antes de aplicar cualquier producto fitosanitario.";
+
+    private const string SistemaVisionRag = """
+Eres AgroGuía IA, asistente agronómico. El usuario envió una FOTO de un cultivo y un análisis visual automático.
+REGLAS:
+1. Usa SOLO el CONTEXTO de manuales y el RESULTADO DE VISIÓN. No inventes plagas, dosis ni marcas.
+2. Si la confianza de visión es baja o el estado es Incierta/SinDeteccion/SinModelo, dilo con claridad: no afirmes un diagnóstico definitivo; pide mejor foto o revisión técnica.
+3. Estructura cuando haya información suficiente:
+   - Qué sugiere el análisis de imagen (con confianza)
+   - Síntomas / causas solo si están en el contexto
+   - Manejo: monitoreo, cultural, biológico; productos químicos solo si aparecen en el contexto
+4. Cita fragmentos con [1], [2] según el orden del CONTEXTO.
+5. Español claro, sin relleno ni "excelente pregunta".
+6. Si el contexto no cubre el manejo, dilo en una frase.
+""";
 
     private const int MaxCaracteresRecomendacion = 700;
 
     private readonly IAnalizadorVision _vision;
     private readonly ContextRetriever _contextRetriever;
+    private readonly IChatCompletionService _chat;
     private readonly VisionOptions _opt;
     private readonly ILogger<DiagnosticoServicioImpl> _log;
 
     public DiagnosticoServicioImpl(
         IAnalizadorVision vision,
         ContextRetriever contextRetriever,
+        IChatCompletionService chat,
         IOptions<VisionOptions> opt,
         ILogger<DiagnosticoServicioImpl> log)
     {
         _vision = vision;
         _contextRetriever = contextRetriever;
+        _chat = chat;
         _opt = opt.Value;
         _log = log;
     }
@@ -54,83 +68,233 @@ public class DiagnosticoServicioImpl : IDiagnosticoServicio
     public async Task<DiagnosticoImagenResponseDto> AnalizarImagenAsync(
         byte[] imagen, string? cultivo = null, CancellationToken ct = default)
     {
-        var r = await _vision.AnalizarAsync(imagen, ct);
+        var sw = Stopwatch.StartNew();
+        var cultivoNorm = NormalizarCultivo(cultivo) ?? "papa";
 
+        var r = await _vision.AnalizarAsync(imagen, ct);
         if (!r.Exito)
         {
             return new DiagnosticoImagenResponseDto
             {
                 Exito = false,
                 ErrorMensaje = r.ErrorMensaje,
-                Advertencia = Advertencia,
-                FechaRespuesta = DateTime.UtcNow
+                Advertencia = AdvertenciaBase,
+                FechaRespuesta = DateTime.UtcNow,
+                TiempoMs = sw.ElapsedMilliseconds,
+                Estado = "Error",
+                Cultivo = cultivoNorm
             };
         }
+
+        var principal = r.Detecciones.FirstOrDefault();
+        var confianza = principal?.Confianza;
+        var estado = ResolverEstado(r, principal, confianza);
 
         var dto = new DiagnosticoImagenResponseDto
         {
             Exito = true,
             ModeloDisponible = r.ModeloDisponible,
-            Detecciones = r.Detecciones.Select(d => Mapear(d)).ToList(),
+            Detecciones = r.Detecciones.Select(Mapear).ToList(),
             Lesiones = r.Lesiones is null ? null : Mapear(r.Lesiones),
-            Advertencia = Advertencia,
+            Advertencia = AdvertenciaBase,
             TiempoMs = r.TiempoMs,
-            FechaRespuesta = DateTime.UtcNow
+            FechaRespuesta = DateTime.UtcNow,
+            Estado = estado,
+            ConfianzaPrincipal = confianza,
+            ClasePredicha = principal?.Etiqueta.Nombre,
+            Cultivo = principal?.Etiqueta.Cultivo ?? cultivoNorm,
+            Resumen = ConstruirResumenVision(r, principal, estado, confianza)
         };
 
-        var principal = r.Detecciones.FirstOrDefault();
+        var preguntaRag = ConstruirPreguntaRag(principal, cultivoNorm, estado);
+        IReadOnlyList<ContextoRecuperado> contextos = Array.Empty<ContextoRecuperado>();
 
-        if (_opt.IncluirRecomendacionesRag && principal is not null
-            && principal.Etiqueta.Tipo is TipoHallazgo.Enfermedad or TipoHallazgo.Plaga)
+        try
         {
-            dto.Recomendaciones = await BuscarRecomendacionesAsync(principal.Etiqueta, cultivo, ct);
+            if (_opt.IncluirRecomendacionesRag)
+                contextos = await _contextRetriever.ObtenerContextoAsync(preguntaRag, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "RAG falló en diagnóstico; se continúa sin fragmentos");
         }
 
-        dto.Resumen = ConstruirResumen(r, principal);
+        dto.Recomendaciones = contextos
+            .Take(Math.Max(1, _opt.MaxRecomendaciones))
+            .Select(c => new RecomendacionDto
+            {
+                Titulo = c.Titulo,
+                Seccion = c.Seccion,
+                Pagina = c.Pagina,
+                Texto = Recortar(c.Texto, MaxCaracteresRecomendacion)
+            })
+            .ToList();
+
+        dto.Fuentes = contextos
+            .Select((c, i) =>
+            {
+                var p = c.Pagina is null ? "" : $", pág. {c.Pagina}";
+                var sec = string.IsNullOrWhiteSpace(c.Seccion) ? "" : $" — {c.Seccion}";
+                return $"[{i + 1}] {c.Titulo}{sec}{p}";
+            })
+            .ToList();
+
+        dto.RespuestaAsistente = await GenerarRespuestaAsistenteAsync(
+            dto.Resumen, estado, confianza, cultivoNorm, principal, contextos, ct);
+
+        dto.TiempoMs = sw.ElapsedMilliseconds;
         return dto;
     }
 
-    // ------------------------------------------------------------ RAG
-
-    /// <summary>
-    /// Busca en los manuales cómo manejar lo detectado. Es un complemento: si Ollama o el índice fallan,
-    /// el diagnóstico se entrega igual, sin recomendaciones.
-    /// </summary>
-    private async Task<List<RecomendacionDto>> BuscarRecomendacionesAsync(
-        EtiquetaVision etiqueta, string? cultivoUsuario, CancellationToken ct)
+    private async Task<string> GenerarRespuestaAsistenteAsync(
+        string resumenVision,
+        string estado,
+        double? confianza,
+        string cultivo,
+        DeteccionVision? principal,
+        IReadOnlyList<ContextoRecuperado> contextos,
+        CancellationToken ct)
     {
         try
         {
-            var cultivo = etiqueta.Cultivo ?? cultivoUsuario;
-            var pregunta = string.IsNullOrWhiteSpace(cultivo)
-                ? $"¿Cómo se identifica y se maneja o controla {etiqueta.Nombre}?"
-                : $"¿Cómo se identifica y se maneja o controla {etiqueta.Nombre} en {cultivo}?";
+            var sb = new StringBuilder();
+            sb.AppendLine("RESULTADO DE VISIÓN:");
+            sb.AppendLine(resumenVision);
+            sb.AppendLine($"Estado: {estado}");
+            if (confianza is not null)
+                sb.AppendLine($"Confianza numérica: {confianza.Value:P0}");
+            sb.AppendLine($"Cultivo de trabajo: {cultivo}");
+            if (principal is not null)
+                sb.AppendLine($"Clase modelo: {principal.Etiqueta.Nombre} ({principal.Etiqueta.Clave})");
 
-            var contextos = await _contextRetriever.ObtenerContextoAsync(pregunta, ct);
-
-            return contextos
-                .Take(Math.Max(1, _opt.MaxRecomendaciones))
-                .Select(c => new RecomendacionDto
+            sb.AppendLine();
+            if (contextos.Count == 0)
+            {
+                sb.AppendLine("CONTEXTO DE MANUALES: (vacío — no hay fragmentos relevantes)");
+            }
+            else
+            {
+                sb.AppendLine("CONTEXTO DE MANUALES:");
+                for (int i = 0; i < contextos.Count; i++)
                 {
-                    Titulo = c.Titulo,
-                    Seccion = c.Seccion,
-                    Pagina = c.Pagina,
-                    Texto = Recortar(c.Texto, MaxCaracteresRecomendacion)
-                })
-                .ToList();
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
+                    var c = contextos[i];
+                    sb.Append('[').Append(i + 1).Append("] ").Append(c.Titulo);
+                    if (!string.IsNullOrWhiteSpace(c.Seccion)) sb.Append(" | ").Append(c.Seccion);
+                    if (c.Pagina is not null) sb.Append(" | pág. ").Append(c.Pagina);
+                    sb.AppendLine().AppendLine(c.Texto).AppendLine();
+                }
+            }
+
+            sb.AppendLine("PREGUNTA DEL USUARIO:");
+            sb.AppendLine("¿Qué tiene esta planta según la imagen y cómo puedo tratarla según los manuales?");
+            sb.AppendLine();
+            sb.AppendLine("Responde como en un chat profesional: claro, con incertidumbre si aplica, y solo manejo respaldado por el contexto.");
+
+            // Si ChatPrompt no acepta modo, usa: new ChatPrompt(SistemaVisionRag, sb.ToString())
+            var prompt = new ChatPrompt(SistemaVisionRag, sb.ToString(), "preciso");
+            var result = await _chat.GenerarAsync(prompt, ct);
+
+            if (result.Exito && !string.IsNullOrWhiteSpace(result.Respuesta))
+                return result.Respuesta.Trim();
+
+            return FallbackSinLlm(resumenVision, contextos);
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "No se pudieron obtener recomendaciones de los manuales para '{Etiqueta}'", etiqueta.Nombre);
-            return new List<RecomendacionDto>();
+            _log.LogWarning(ex, "LLM no disponible en diagnóstico; se usa fallback");
+            return FallbackSinLlm(resumenVision, contextos);
         }
     }
 
-    // ------------------------------------------------------------ mapeo y texto
+    private static string FallbackSinLlm(string resumen, IReadOnlyList<ContextoRecuperado> contextos)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(resumen);
+        sb.AppendLine();
+        if (contextos.Count == 0)
+        {
+            sb.AppendLine("No encontré fragmentos suficientes en los manuales para detallar el manejo. Consulta con un técnico de tu zona.");
+            return sb.ToString();
+        }
+
+        sb.AppendLine("Según los manuales técnicos:");
+        for (int i = 0; i < Math.Min(2, contextos.Count); i++)
+        {
+            var t = contextos[i].Texto;
+            if (t.Length > 500) t = t[..500] + "…";
+            sb.AppendLine($"[{i + 1}] {t}");
+        }
+        return sb.ToString();
+    }
+
+    private static string ResolverEstado(ResultadoVision r, DeteccionVision? principal, double? confianza)
+    {
+        if (!r.ModeloDisponible) return "SinModelo";
+        if (principal is null) return "SinDeteccion";
+        if (confianza < 0.45) return "Incierta";
+        if (principal.Etiqueta.Tipo == TipoHallazgo.Sano) return "Identificada";
+        if (string.Equals(principal.Etiqueta.Clave, "papa_otra_o_incierta", StringComparison.OrdinalIgnoreCase))
+            return "Incierta";
+        return "Identificada";
+    }
+
+    private static string ConstruirResumenVision(
+        ResultadoVision r, DeteccionVision? principal, string estado, double? confianza)
+    {
+        if (!r.ModeloDisponible)
+            return "El modelo de reconocimiento no está cargado; solo se evaluó daño aparente por color. No hay clasificación de enfermedad.";
+
+        if (principal is null || estado is "SinDeteccion" or "Incierta")
+        {
+            var baseTxt = principal is null
+                ? "No se identificó una plaga o enfermedad con suficiente confianza."
+                : $"Posible coincidencia: {principal.Etiqueta.Nombre}" +
+                  (confianza is not null ? $" ({confianza.Value * 100:0}% confianza)" : "") +
+                  " — no es confirmación de laboratorio.";
+            return baseTxt + " Se recomienda otra foto más cercana, buena luz, o revisión con un técnico.";
+        }
+
+        var pct = confianza is not null ? $" ({confianza.Value * 100:0}% confianza)" : "";
+        var cult = string.IsNullOrWhiteSpace(principal.Etiqueta.Cultivo)
+            ? ""
+            : $" en {principal.Etiqueta.Cultivo}";
+
+        return principal.Etiqueta.Tipo switch
+        {
+            TipoHallazgo.Sano => $"La planta parece sana{cult}{pct}. No es un dictamen definitivo.",
+            TipoHallazgo.Plaga => $"Posible plaga: {principal.Etiqueta.Nombre}{cult}{pct} — no es confirmación de laboratorio.",
+            TipoHallazgo.Enfermedad => $"Posible enfermedad: {principal.Etiqueta.Nombre}{cult}{pct} — no es confirmación de laboratorio.",
+            _ => $"Posible hallazgo: {principal.Etiqueta.Nombre}{cult}{pct}."
+        };
+    }
+
+    private static string ConstruirPreguntaRag(DeteccionVision? principal, string cultivo, string estado)
+    {
+        if (principal is null || estado is "SinModelo" or "SinDeteccion")
+            return $"enfermedades y plagas frecuentes en {cultivo} síntomas en hojas manejo integrado";
+
+        var nombre = principal.Etiqueta.Nombre;
+        if (nombre.Contains("tardío", StringComparison.OrdinalIgnoreCase)
+            || nombre.Contains("tardio", StringComparison.OrdinalIgnoreCase)
+            || nombre.Contains("lanosa", StringComparison.OrdinalIgnoreCase)
+            || nombre.Contains("lancha", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"tizón tardío lancha lanosa Phytophthora en {cultivo} síntomas causas manejo cultural biológico fungicida";
+        }
+
+        return $"cómo se identifica y se maneja {nombre} en {cultivo} síntomas control integrado";
+    }
+
+    private static string? NormalizarCultivo(string? c)
+    {
+        if (string.IsNullOrWhiteSpace(c)) return null;
+        var t = c.Trim().ToLowerInvariant();
+        if (t is "potato" or "papas") return "papa";
+        if (t is "quinoa") return "quinua";
+        if (t is "maíz" or "corn") return "maiz";
+        return t;
+    }
 
     private static DeteccionDto Mapear(DeteccionVision d) => new()
     {
@@ -149,44 +313,6 @@ public class DiagnosticoServicioImpl : IDiagnosticoServicio
         NumeroManchas = l.NumeroManchas,
         Severidad = l.Severidad
     };
-
-    private static string ConstruirResumen(ResultadoVision r, DeteccionVision? principal)
-    {
-        var partes = new List<string>();
-
-        if (!r.ModeloDisponible)
-        {
-            partes.Add("El modelo de reconocimiento aún no está configurado; solo se analizó el color de la hoja.");
-        }
-        else if (principal is null)
-        {
-            partes.Add("No se pudo identificar la plaga o enfermedad con suficiente confianza. " +
-                       "Prueba con una foto más cercana, con buena luz y la hoja bien enfocada.");
-        }
-        else
-        {
-            var pct = $"{principal.Confianza * 100:0}%";
-            var cultivo = string.IsNullOrWhiteSpace(principal.Etiqueta.Cultivo)
-                ? string.Empty
-                : $" en {principal.Etiqueta.Cultivo}";
-
-            partes.Add(principal.Etiqueta.Tipo switch
-            {
-                TipoHallazgo.Sano => $"La planta parece sana ({pct} de confianza).",
-                TipoHallazgo.Plaga => $"Posible plaga: {principal.Etiqueta.Nombre}{cultivo} ({pct} de confianza).",
-                TipoHallazgo.Enfermedad => $"Posible enfermedad: {principal.Etiqueta.Nombre}{cultivo} ({pct} de confianza).",
-                _ => $"Posible coincidencia: {principal.Etiqueta.Nombre}{cultivo} ({pct} de confianza)."
-            });
-        }
-
-        if (r.Lesiones is { TejidoVegetalDetectado: true } l)
-        {
-            partes.Add($"Aproximadamente {l.PorcentajeAfectado:0.#}% del tejido visible muestra daño por color " +
-                       $"(severidad {l.Severidad.ToLowerInvariant()}).");
-        }
-
-        return string.Join(" ", partes);
-    }
 
     private static string Recortar(string texto, int max)
     {

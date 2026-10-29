@@ -118,7 +118,9 @@ builder.Services.AddServicioExterno(builder.Configuration);
 builder.Services.AddScoped<IRAGServicio, RAGServicioImpl>();
 builder.Services.AddScoped<IDiagnosticoServicio, DiagnosticoServicioImpl>();   // <-- NUEVA
 builder.Services.AddScoped<IJwtService, JwtServiceImpl>();
+builder.Services.AddScoped<IVisionIncidenciaRepositorio, VisionIncidenciaRepositorioImpl>();
 // ==================== APP ====================
+// Precarga del índice vectorial (no bloquea el arranque del HTTP)  
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())

@@ -16,7 +16,7 @@ public partial class AgroGuiaIA_DBContext : DbContext
     public virtual DbSet<Conversaciones> Conversaciones { get; set; }
 
     public virtual DbSet<EmbeddingChunks> EmbeddingChunks { get; set; }
-
+    public virtual DbSet<VisionIncidencias> VisionIncidencias { get; set; }
     public virtual DbSet<Mensajes> Mensajes { get; set; }
 
     public virtual DbSet<Usuarios> Usuarios { get; set; }
@@ -124,6 +124,21 @@ public partial class AgroGuiaIA_DBContext : DbContext
             entity.Property(e => e.Telefono)
                 .HasMaxLength(20)
                 .IsUnicode(false);
+        });
+        modelBuilder.Entity<VisionIncidencias>(e =>
+        {
+            e.ToTable("VisionIncidencias");
+            e.HasKey(x => x.Id);
+
+            e.Property(x => x.Cultivo).HasMaxLength(64);
+            e.Property(x => x.RutaImagen).HasMaxLength(500);
+            e.Property(x => x.HashImagen).HasMaxLength(64);
+            e.Property(x => x.ClavePredicha).HasMaxLength(128);
+            e.Property(x => x.NombrePredicho).HasMaxLength(256);
+            e.Property(x => x.Estado).HasMaxLength(32).IsRequired();
+            e.Property(x => x.ModeloVersion).HasMaxLength(128);
+
+            e.HasIndex(x => new { x.UsuarioId, x.FechaCreacion });
         });
 
         OnModelCreatingPartial(modelBuilder);
