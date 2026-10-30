@@ -2,111 +2,86 @@ using System.Diagnostics;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
 using AgroGuia.Infraestructura.ServicioExterno.Models;
 using AgroGuia.Infraestructura.ServicioExterno.Vision.Clasificacion;
-using AgroGuia.Infraestructura.ServicioExterno.Vision.Lesiones;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using OpenCvSharp;
 
 namespace AgroGuia.Infraestructura.ServicioExterno.Vision;
 
 /// <summary>
-/// Orquesta el análisis de una foto: valida -> decodifica -> limita tamaño -> daño por color (siempre)
-/// -> clasificación con el modelo ONNX (si está disponible). Es el único lugar que decodifica la imagen.
+/// MODO SEGURO (prototipo chat + RAG):
+/// No usa OpenCV nativo. Evita el cierre del proceso con código -1 (0xffffffff).
+/// Cuando tengas modelo.onnx + OpenCvSharp4.runtime.win estable,
+/// se podrá volver a la implementación con Cv2.ImDecode.
+///
+/// Flujo diagrama:
+/// - Modelo no disponible → SinModelo / SinDeteccion
+/// - DiagnosticoServicioImpl sigue con RAG + LLM y pide consultar técnico
 /// </summary>
 public sealed class AnalizadorVisionOpenCv : IAnalizadorVision
 {
     private readonly IClasificadorImagen _clasificador;
-    private readonly IAnalizadorLesiones _lesiones;
     private readonly VisionOptions _opt;
     private readonly ILogger<AnalizadorVisionOpenCv> _log;
 
     public AnalizadorVisionOpenCv(
         IClasificadorImagen clasificador,
-        IAnalizadorLesiones lesiones,
         IOptions<VisionOptions> opt,
         ILogger<AnalizadorVisionOpenCv> log)
     {
         _clasificador = clasificador;
-        _lesiones = lesiones;
         _opt = opt.Value;
         _log = log;
     }
 
-    public EstadoVision ObtenerEstado() => _clasificador.Estado;
-
-    // El trabajo es CPU-bound: se saca del hilo de la petición.
-    public Task<ResultadoVision> AnalizarAsync(byte[] imagen, CancellationToken ct = default) =>
-        Task.Run(() => Analizar(imagen, ct), ct);
-
-    private ResultadoVision Analizar(byte[] bytes, CancellationToken ct)
+    public EstadoVision ObtenerEstado()
     {
-        var reloj = Stopwatch.StartNew();
-
-        var error = ImagenValidador.Validar(bytes, _opt.MaxBytesImagen);
-        if (error is not null) return ResultadoVision.Fallo(error);
-
-        try
+        var e = _clasificador.Estado;
+        if (!e.ModeloDisponible)
         {
-            using var original = Cv2.ImDecode(bytes, ImreadModes.Color);
-            if (original.Empty())
-                return ResultadoVision.Fallo("No se pudo leer la imagen (archivo dañado o formato no soportado).");
-
-            ct.ThrowIfCancellationRequested();
-
-            using var reducida = ReducirSiEsNecesario(original);
-            var imagen = reducida ?? original;
-
-            var lesiones = _lesiones.Analizar(imagen);
-
-            ct.ThrowIfCancellationRequested();
-
-            IReadOnlyList<DeteccionVision> detecciones = Array.Empty<DeteccionVision>();
-            if (_clasificador.Disponible)
+            return e with
             {
-                detecciones = _clasificador.Clasificar(imagen, _opt.TopK)
-                    .Where(d => d.Confianza >= _opt.ConfianzaMinima)
-                    .ToList();
-            }
+                Detalle = (e.Detalle ?? "") +
+                    " Visión en modo seguro (sin OpenCV nativo). " +
+                    "La API no clasifica la foto; el chat responde con RAG e indica consultar a un técnico."
+            };
+        }
 
-            _log.LogInformation(
-                "[Vision] {W}x{H} px | modelo {Modelo} | {N} detecciones | daño {Pct}% | {Ms} ms",
-                imagen.Width, imagen.Height, _clasificador.Disponible ? "sí" : "no",
-                detecciones.Count, lesiones.PorcentajeAfectado, reloj.ElapsedMilliseconds);
-
-            return new ResultadoVision(
-                Exito: true,
-                ErrorMensaje: string.Empty,
-                Detecciones: detecciones,
-                Lesiones: lesiones,
-                ModeloDisponible: _clasificador.Disponible,
-                Ancho: original.Width,
-                Alto: original.Height,
-                TiempoMs: reloj.ElapsedMilliseconds);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "[Vision] Error analizando la imagen");
-            return ResultadoVision.Fallo("Ocurrió un error al procesar la imagen. Intenta con otra foto.");
-        }
+        // Hay archivo de modelo, pero este analizador aún no ejecuta DNN nativo
+        // para no tumbar el proceso hasta validar runtime.
+        return new EstadoVision(
+            ModeloDisponible: false,
+            Modelo: e.Modelo,
+            NumeroEtiquetas: e.NumeroEtiquetas,
+            Detalle: "Hay archivo de modelo configurado, pero el análisis nativo OpenCV está desactivado " +
+                     "en modo seguro. Actívalo cuando OpenCvSharp4.runtime.win esté instalado y probado.");
     }
 
-    /// <summary>Devuelve una copia reducida si el lado mayor supera MaxLadoPx; si no, null (se usa la original).</summary>
-    private Mat? ReducirSiEsNecesario(Mat original)
+    public Task<ResultadoVision> AnalizarAsync(byte[] imagen, CancellationToken ct = default)
     {
-        var lado = Math.Max(original.Width, original.Height);
-        if (_opt.MaxLadoPx <= 0 || lado <= _opt.MaxLadoPx) return null;
+        return Task.FromResult(Analizar(imagen));
+    }
 
-        var factor = (double)_opt.MaxLadoPx / lado;
-        var nueva = new Size(
-            Math.Max(1, (int)Math.Round(original.Width * factor)),
-            Math.Max(1, (int)Math.Round(original.Height * factor)));
+    private ResultadoVision Analizar(byte[] bytes)
+    {
+        var sw = Stopwatch.StartNew();
 
-        var salida = new Mat();
-        Cv2.Resize(original, salida, nueva, 0, 0, InterpolationFlags.Area);
-        return salida;
+        var error = ImagenValidador.Validar(bytes, _opt.MaxBytesImagen);
+        if (error is not null)
+            return ResultadoVision.Fallo(error);
+
+        _log.LogInformation(
+            "[Vision] Modo seguro: foto recibida ({Bytes} bytes). Sin OpenCV nativo → SinModelo/SinDeteccion.",
+            bytes.Length);
+
+        // Caso 2 del diagrama: no se identifica la afección (aún no hay pipeline nativo estable)
+        return new ResultadoVision(
+            Exito: true,
+            ErrorMensaje: string.Empty,
+            Detecciones: Array.Empty<DeteccionVision>(),
+            Lesiones: null,
+            ModeloDisponible: false,
+            Ancho: 0,
+            Alto: 0,
+            TiempoMs: sw.ElapsedMilliseconds);
     }
 }
