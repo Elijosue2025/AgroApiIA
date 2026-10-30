@@ -1,10 +1,10 @@
-namespace AgroGuiaWEBApi.Requests
+using Microsoft.AspNetCore.Http;
+
+namespace AgroGuiaWEBApi.Requests;
+
+public class AnalizarImagenRequest
 {
-    /// <summary>Formulario multipart/form-data de POST api/Diagnostico/analizar.</summary>
-    public class AnalizarImagenRequest
-    {
-        public IFormFile? Imagen { get; set; }
-        public string? Cultivo { get; set; }
-        public long? ConversacionId { get; set; }
-    }
+    public IFormFile? Imagen { get; set; }
+    public string? Cultivo { get; set; }
+    public long? ConversacionId { get; set; }
 }

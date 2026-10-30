@@ -94,14 +94,13 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
-
 // ==================== REPOSITORIOS ====================
 builder.Services.AddScoped<IUsuarioRepositorio, UsuarioRepositorioImpl>();
 builder.Services.AddScoped<IConversacionRepositorio, ConversacionRepositorioImpl>();
 builder.Services.AddScoped<IEmbeddingRepositorio, EmbeddingRepositorioImpl>();
-// NO registrar IMensajeRepositorio si ya no lo usas
+builder.Services.AddScoped<IVisionIncidenciaRepositorio, VisionIncidenciaRepositorioImpl>();
 
-// ==================== SERVICIOS ====================
+// ==================== SERVICIOS DE APLICACIÓN ====================
 builder.Services.AddScoped<IAuthServicio, AuthServicioImpl>();
 builder.Services.AddScoped<IUsuarioServicio, UsuarioServicioImpl>();
 builder.Services.AddScoped<IConversacionServicio, ConversacionServicioImpl>();
@@ -110,17 +109,9 @@ builder.Services.AddScoped<IRAGServicio, RAGServicioImpl>();
 builder.Services.AddScoped<IJwtService, JwtServiceImpl>();
 builder.Services.AddScoped<IDiagnosticoServicio, DiagnosticoServicioImpl>();
 
+// ==================== OLLAMA / RAG / VISIÓN (una sola vez) ====================
 builder.Services.AddServicioExterno(builder.Configuration);
 
-// ==================== OLLAMA / RAG / EMBEDDINGS ====================
-builder.Services.AddServicioExterno(builder.Configuration);
-// ==================== Vision ====================
-builder.Services.AddScoped<IRAGServicio, RAGServicioImpl>();
-builder.Services.AddScoped<IDiagnosticoServicio, DiagnosticoServicioImpl>();   // <-- NUEVA
-builder.Services.AddScoped<IJwtService, JwtServiceImpl>();
-builder.Services.AddScoped<IVisionIncidenciaRepositorio, VisionIncidenciaRepositorioImpl>();
-// ==================== APP ====================
-// Precarga del índice vectorial (no bloquea el arranque del HTTP)  
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -129,18 +120,23 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// En desarrollo evita forzar HTTPS (el front usa http://localhost:5261)
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
 app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// Precarga del índice vectorial (no bloquea el arranque del HTTP)
+// Precarga RAG (no tumba el host)
 _ = Task.Run(async () =>
 {
     try
     {
-        await Task.Delay(2000); // espera a que el host esté listo
+        await Task.Delay(2000);
         using var scope = app.Services.CreateScope();
         var index = scope.ServiceProvider.GetRequiredService<IVectorIndex>();
         await index.ObtenerAsync();
@@ -151,12 +147,14 @@ _ = Task.Run(async () =>
         Console.WriteLine($"[RAG] Precarga falló: {ex.Message}");
     }
 });
-// Precarga del modelo de visión (OpenCV/ONNX). Si no hay modelo la API funciona igual: solo se avisa.
+
+// Precarga visión (no tumba el host)
 _ = Task.Run(() =>
 {
     try
     {
-        var vision = app.Services.GetRequiredService<IAnalizadorVision>();
+        using var scope = app.Services.CreateScope();
+        var vision = scope.ServiceProvider.GetRequiredService<IAnalizadorVision>();
         var estado = vision.ObtenerEstado();
         Console.WriteLine(estado.ModeloDisponible
             ? $"[Vision] Modelo '{estado.Modelo}' cargado ({estado.NumeroEtiquetas} clases)."
@@ -164,7 +162,7 @@ _ = Task.Run(() =>
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"[Vision] Precarga falló: {ex.Message}");
+        Console.WriteLine($"[Vision] Precarga falló (la API sigue): {ex.Message}");
     }
 });
 
