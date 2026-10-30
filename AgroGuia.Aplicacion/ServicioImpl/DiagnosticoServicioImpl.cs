@@ -1,7 +1,10 @@
 ﻿using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using AgroGuia.Aplicacion.DTO.DTOS.Diagnostico;
 using AgroGuia.Aplicacion.Servicio;
+using AgroGuia.Dominio.Modelo.Abstracciones;
+using AgroGuia.Dominio.Modelo.Entidades;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
 using AgroGuia.Infraestructura.ServicioExterno.Models;
 using AgroGuia.Infraestructura.ServicioExterno.RAG;
@@ -38,19 +41,22 @@ REGLAS:
     private readonly IChatCompletionService _chat;
     private readonly VisionOptions _opt;
     private readonly ILogger<DiagnosticoServicioImpl> _log;
+    private readonly IVisionIncidenciaRepositorio _incidencias;
 
     public DiagnosticoServicioImpl(
         IAnalizadorVision vision,
         ContextRetriever contextRetriever,
         IChatCompletionService chat,
         IOptions<VisionOptions> opt,
-        ILogger<DiagnosticoServicioImpl> log)
+        ILogger<DiagnosticoServicioImpl> log,
+        IVisionIncidenciaRepositorio incidencias)
     {
         _vision = vision;
         _contextRetriever = contextRetriever;
         _chat = chat;
         _opt = opt.Value;
         _log = log;
+        _incidencias = incidencias;
     }
 
     public DiagnosticoEstadoDto ObtenerEstado()
@@ -66,7 +72,11 @@ REGLAS:
     }
 
     public async Task<DiagnosticoImagenResponseDto> AnalizarImagenAsync(
-        byte[] imagen, string? cultivo = null, CancellationToken ct = default)
+        byte[] imagen,
+        string? cultivo = null,
+        long usuarioId = 0,
+        long? conversacionId = null,
+        CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
         var cultivoNorm = NormalizarCultivo(cultivo) ?? "papa";
@@ -74,7 +84,7 @@ REGLAS:
         var r = await _vision.AnalizarAsync(imagen, ct);
         if (!r.Exito)
         {
-            return new DiagnosticoImagenResponseDto
+            var errorDto = new DiagnosticoImagenResponseDto
             {
                 Exito = false,
                 ErrorMensaje = r.ErrorMensaje,
@@ -84,6 +94,17 @@ REGLAS:
                 Estado = "Error",
                 Cultivo = cultivoNorm
             };
+
+            try
+            {
+                await GuardarIncidenciaAsync(usuarioId, conversacionId, errorDto, null, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "No se pudo guardar incidencia de error de visión");
+            }
+
+            return errorDto;
         }
 
         var principal = r.Detecciones.FirstOrDefault();
@@ -114,7 +135,10 @@ REGLAS:
             if (_opt.IncluirRecomendacionesRag)
                 contextos = await _contextRetriever.ObtenerContextoAsync(preguntaRag, ct);
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _log.LogWarning(ex, "RAG falló en diagnóstico; se continúa sin fragmentos");
@@ -143,8 +167,96 @@ REGLAS:
         dto.RespuestaAsistente = await GenerarRespuestaAsistenteAsync(
             dto.Resumen, estado, confianza, cultivoNorm, principal, contextos, ct);
 
+        try
+        {
+            await GuardarIncidenciaAsync(usuarioId, conversacionId, dto, null, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "No se pudo guardar la incidencia de visión");
+        }
+
         dto.TiempoMs = sw.ElapsedMilliseconds;
         return dto;
+    }
+
+    public async Task<IReadOnlyList<VisionIncidenciaDto>> ListarIncidenciasMiasAsync(
+        long usuarioId, int take = 50, CancellationToken ct = default)
+    {
+        var list = await _incidencias.ListarPorUsuarioAsync(usuarioId, take, ct);
+        return list.Select(MapIncidencia).ToList();
+    }
+
+    public async Task<VisionIncidenciaDto?> ObtenerIncidenciaMiaAsync(
+        long usuarioId, long id, CancellationToken ct = default)
+    {
+        var x = await _incidencias.ObtenerPorIdAsync(id, ct);
+        if (x is null || x.UsuarioId != usuarioId)
+            return null;
+        return MapIncidencia(x);
+    }
+
+    private async Task GuardarIncidenciaAsync(
+        long usuarioId,
+        long? conversacionId,
+        DiagnosticoImagenResponseDto dto,
+        string? modeloVersion,
+        CancellationToken ct)
+    {
+        if (usuarioId <= 0)
+            return;
+
+        string? fuentesJson = null;
+        if (dto.Fuentes is { Count: > 0 })
+            fuentesJson = JsonSerializer.Serialize(dto.Fuentes);
+
+        await _incidencias.CrearAsync(new VisionIncidencias
+        {
+            UsuarioId = usuarioId,
+            ConversacionId = conversacionId is > 0 ? conversacionId : null,
+            Cultivo = dto.Cultivo,
+            ClavePredicha = dto.Detecciones.FirstOrDefault()?.Clave,
+            NombrePredicho = dto.ClasePredicha,
+            Confianza = dto.ConfianzaPrincipal,
+            Estado = string.IsNullOrWhiteSpace(dto.Estado) ? "Incierta" : dto.Estado,
+            ModeloVersion = modeloVersion,
+            ResumenVision = dto.Resumen,
+            RespuestaAsistente = dto.RespuestaAsistente,
+            FuentesJson = fuentesJson
+        }, ct);
+    }
+
+    private static VisionIncidenciaDto MapIncidencia(VisionIncidencias x)
+    {
+        var fuentes = new List<string>();
+        if (!string.IsNullOrWhiteSpace(x.FuentesJson))
+        {
+            try
+            {
+                fuentes = JsonSerializer.Deserialize<List<string>>(x.FuentesJson) ?? new List<string>();
+            }
+            catch
+            {
+                // ignore JSON inválido
+            }
+        }
+
+        return new VisionIncidenciaDto
+        {
+            Id = x.Id,
+            ConversacionId = x.ConversacionId,
+            Cultivo = x.Cultivo,
+            RutaImagen = x.RutaImagen,
+            ClavePredicha = x.ClavePredicha,
+            NombrePredicho = x.NombrePredicho,
+            Confianza = x.Confianza,
+            Estado = x.Estado,
+            ModeloVersion = x.ModeloVersion,
+            ResumenVision = x.ResumenVision,
+            RespuestaAsistente = x.RespuestaAsistente,
+            Fuentes = fuentes,
+            FechaCreacion = x.FechaCreacion
+        };
     }
 
     private async Task<string> GenerarRespuestaAsistenteAsync(
@@ -191,7 +303,6 @@ REGLAS:
             sb.AppendLine();
             sb.AppendLine("Responde como en un chat profesional: claro, con incertidumbre si aplica, y solo manejo respaldado por el contexto.");
 
-            // Si ChatPrompt no acepta modo, usa: new ChatPrompt(SistemaVisionRag, sb.ToString())
             var prompt = new ChatPrompt(SistemaVisionRag, sb.ToString(), "preciso");
             var result = await _chat.GenerarAsync(prompt, ct);
 
