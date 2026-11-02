@@ -66,10 +66,11 @@ public class DiagnosticoController : ControllerBase
 
             var respuesta = await _diagnosticoServicio.AnalizarImagenAsync(
                 bytes,
-                request.Cultivo,
-                Uid(),
-                conversacionId,
-                ct);
+    request.Cultivo,
+    Uid(),
+    conversacionId,
+    request.Consulta,
+    ct);
 
             return respuesta.Exito ? Ok(respuesta) : BadRequest(respuesta);
         }

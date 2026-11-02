@@ -1,11 +1,4 @@
 ﻿using AgroGuia.Aplicacion.DTO.DTOS.Diagnostico;
-using AgroGuia.Dominio.Modelo.Entidades;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
 
 namespace AgroGuia.Aplicacion.Servicio;
 
@@ -16,6 +9,7 @@ public interface IDiagnosticoServicio
         string? cultivo = null,
         long usuarioId = 0,
         long? conversacionId = null,
+        string? consulta = null,
         CancellationToken ct = default);
 
     DiagnosticoEstadoDto ObtenerEstado();

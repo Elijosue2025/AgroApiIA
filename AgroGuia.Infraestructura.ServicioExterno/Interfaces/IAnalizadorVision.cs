@@ -15,7 +15,6 @@ namespace AgroGuia.Infraestructura.ServicioExterno.Interfaces
     {
         /// <summary>Analiza una foto (JPG/PNG/WebP/BMP) de una planta y devuelve detecciones y daño estimado.</summary>
         Task<ResultadoVision> AnalizarAsync(byte[] imagen, CancellationToken ct = default);
-
         /// <summary>Indica si el modelo ONNX y las etiquetas están cargados. Fuerza la carga si aún no ocurrió.</summary>
         EstadoVision ObtenerEstado();
     }

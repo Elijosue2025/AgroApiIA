@@ -2,86 +2,74 @@ using System.Diagnostics;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
 using AgroGuia.Infraestructura.ServicioExterno.Models;
 using AgroGuia.Infraestructura.ServicioExterno.Vision.Clasificacion;
+using AgroGuia.Infraestructura.ServicioExterno.Vision.Lesiones;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OpenCvSharp;
 
 namespace AgroGuia.Infraestructura.ServicioExterno.Vision;
 
-/// <summary>
-/// MODO SEGURO (prototipo chat + RAG):
-/// No usa OpenCV nativo. Evita el cierre del proceso con código -1 (0xffffffff).
-/// Cuando tengas modelo.onnx + OpenCvSharp4.runtime.win estable,
-/// se podrá volver a la implementación con Cv2.ImDecode.
-///
-/// Flujo diagrama:
-/// - Modelo no disponible → SinModelo / SinDeteccion
-/// - DiagnosticoServicioImpl sigue con RAG + LLM y pide consultar técnico
-/// </summary>
 public sealed class AnalizadorVisionOpenCv : IAnalizadorVision
 {
     private readonly IClasificadorImagen _clasificador;
+    private readonly IAnalizadorLesiones _lesiones;
     private readonly VisionOptions _opt;
     private readonly ILogger<AnalizadorVisionOpenCv> _log;
 
     public AnalizadorVisionOpenCv(
         IClasificadorImagen clasificador,
+        IAnalizadorLesiones lesiones,
         IOptions<VisionOptions> opt,
         ILogger<AnalizadorVisionOpenCv> log)
     {
         _clasificador = clasificador;
+        _lesiones = lesiones;
         _opt = opt.Value;
         _log = log;
     }
 
-    public EstadoVision ObtenerEstado()
-    {
-        var e = _clasificador.Estado;
-        if (!e.ModeloDisponible)
-        {
-            return e with
-            {
-                Detalle = (e.Detalle ?? "") +
-                    " Visión en modo seguro (sin OpenCV nativo). " +
-                    "La API no clasifica la foto; el chat responde con RAG e indica consultar a un técnico."
-            };
-        }
+    public EstadoVision ObtenerEstado() => _clasificador.Estado;
 
-        // Hay archivo de modelo, pero este analizador aún no ejecuta DNN nativo
-        // para no tumbar el proceso hasta validar runtime.
-        return new EstadoVision(
-            ModeloDisponible: false,
-            Modelo: e.Modelo,
-            NumeroEtiquetas: e.NumeroEtiquetas,
-            Detalle: "Hay archivo de modelo configurado, pero el análisis nativo OpenCV está desactivado " +
-                     "en modo seguro. Actívalo cuando OpenCvSharp4.runtime.win esté instalado y probado.");
-    }
-
-    public Task<ResultadoVision> AnalizarAsync(byte[] imagen, CancellationToken ct = default)
-    {
-        return Task.FromResult(Analizar(imagen));
-    }
+    public Task<ResultadoVision> AnalizarAsync(byte[] imagen, CancellationToken ct = default) =>
+        Task.Run(() => Analizar(imagen), ct);
 
     private ResultadoVision Analizar(byte[] bytes)
     {
-        var sw = Stopwatch.StartNew();
-
+        var reloj = Stopwatch.StartNew();
         var error = ImagenValidador.Validar(bytes, _opt.MaxBytesImagen);
-        if (error is not null)
-            return ResultadoVision.Fallo(error);
+        if (error is not null) return ResultadoVision.Fallo(error);
 
-        _log.LogInformation(
-            "[Vision] Modo seguro: foto recibida ({Bytes} bytes). Sin OpenCV nativo → SinModelo/SinDeteccion.",
-            bytes.Length);
+        using var original = Cv2.ImDecode(bytes, ImreadModes.Color);
+        if (original.Empty())
+            return ResultadoVision.Fallo("No se pudo leer la imagen. Usa JPG o PNG.");
 
-        // Caso 2 del diagrama: no se identifica la afección (aún no hay pipeline nativo estable)
+        using var reducida = Reducir(original);
+        var imagen = reducida ?? original;
+        var lesiones = _lesiones.Analizar(imagen);
+
+        IReadOnlyList<DeteccionVision> detecciones = Array.Empty<DeteccionVision>();
+        if (_clasificador.Disponible)
+        {
+            detecciones = _clasificador.Clasificar(imagen, _opt.TopK)
+                .Where(d => d.Confianza >= _opt.ConfianzaMinima)
+                .ToList();
+        }
+
         return new ResultadoVision(
-            Exito: true,
-            ErrorMensaje: string.Empty,
-            Detecciones: Array.Empty<DeteccionVision>(),
-            Lesiones: null,
-            ModeloDisponible: false,
-            Ancho: 0,
-            Alto: 0,
-            TiempoMs: sw.ElapsedMilliseconds);
+            true, "", detecciones, lesiones, _clasificador.Disponible,
+            original.Width, original.Height, reloj.ElapsedMilliseconds);
+    }
+
+    private Mat? Reducir(Mat original)
+    {
+        var lado = Math.Max(original.Width, original.Height);
+        if (_opt.MaxLadoPx <= 0 || lado <= _opt.MaxLadoPx) return null;
+        var factor = (double)_opt.MaxLadoPx / lado;
+        var salida = new Mat();
+        Cv2.Resize(original, salida, new Size(
+            Math.Max(1, (int)Math.Round(original.Width * factor)),
+            Math.Max(1, (int)Math.Round(original.Height * factor))),
+            0, 0, InterpolationFlags.Area);
+        return salida;
     }
 }

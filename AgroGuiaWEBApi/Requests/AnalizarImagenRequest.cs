@@ -7,4 +7,5 @@ public class AnalizarImagenRequest
     public IFormFile? Imagen { get; set; }
     public string? Cultivo { get; set; }
     public long? ConversacionId { get; set; }
+    public string? Consulta { get; set; }
 }
