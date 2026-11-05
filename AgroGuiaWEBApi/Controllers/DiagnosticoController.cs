@@ -73,7 +73,7 @@ public class DiagnosticoController : ControllerBase
     ct);
 
             return respuesta.Exito ? Ok(respuesta) : BadRequest(respuesta);
-        }
+        }   
         catch (OperationCanceledException)
         {
             throw;
