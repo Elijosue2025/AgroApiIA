@@ -8,4 +8,6 @@ public class AnalizarImagenRequest
     public string? Cultivo { get; set; }
     public long? ConversacionId { get; set; }
     public string? Consulta { get; set; }
+    /// <summary>"rapido" | "preciso"</summary>
+    public string? ModoModelo { get; set; }
 }
