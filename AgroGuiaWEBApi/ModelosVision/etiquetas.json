@@ -1,0 +1,20 @@
+[
+  {
+    "clave": "lanosa",
+    "nombre": "lancha (tizón tardío)",
+    "cultivo": "papa",
+    "tipo": "Enfermedad"
+  },
+  {
+    "clave": "sana",
+    "nombre": "sana",
+    "cultivo": "papa",
+    "tipo": "Sano"
+  },
+  {
+    "clave": "tizon_temprano",
+    "nombre": "tizón temprano",
+    "cultivo": "papa",
+    "tipo": "Enfermedad"
+  }
+]
