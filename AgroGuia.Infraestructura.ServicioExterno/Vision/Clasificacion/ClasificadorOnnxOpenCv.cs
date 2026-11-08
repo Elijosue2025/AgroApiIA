@@ -1,20 +1,16 @@
-using System.Runtime.InteropServices;
 using AgroGuia.Infraestructura.ServicioExterno.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenCvSharp;
-using OpenCvSharp.Dnn;
 
 namespace AgroGuia.Infraestructura.ServicioExterno.Vision.Clasificacion;
 
 /// <summary>
-/// Clasificador de imágenes con un modelo ONNX ejecutado por el módulo DNN de OpenCV (CPU).
-///
-///  - Singleton: la red se carga UNA vez, de forma perezosa y sin lanzar excepciones. Si falta el modelo
-///    o las etiquetas, la API arranca igual y <see cref="Disponible"/> queda en false.
-///  - cv::dnn::Net no admite inferencias concurrentes: se serializa con un lock (una inferencia de
-///    clasificación en CPU toma decenas o pocos cientos de ms).
-///  - Salida esperada: vector de N clases (logits o probabilidades). Si son logits se aplica softmax.
+/// Clasifica con ONNX Runtime. OpenCV solo lee y redimensiona la foto.
+/// CvDnn.Forward de este MobileNet tumba el proceso (código -1) y un try/catch no lo alcanza.
+/// Entrada: RGB 0..1, 224x224. La normalización de ImageNet ya va dentro del ONNX.
 /// </summary>
 public sealed class ClasificadorOnnxOpenCv : IClasificadorImagen, IDisposable
 {
@@ -24,7 +20,8 @@ public sealed class ClasificadorOnnxOpenCv : IClasificadorImagen, IDisposable
     private readonly Lazy<Cargado> _cargado;
 
     private sealed record Cargado(
-        Net? Red,
+        InferenceSession? Sesion,
+        string? NombreEntrada,
         IReadOnlyList<EtiquetaVision> Etiquetas,
         string? Modelo,
         string? Detalle);
@@ -36,52 +33,40 @@ public sealed class ClasificadorOnnxOpenCv : IClasificadorImagen, IDisposable
         _cargado = new Lazy<Cargado>(Cargar, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
-    public bool Disponible => _cargado.Value.Red is not null;
+    public bool Disponible => _cargado.Value.Sesion is not null;
 
     public EstadoVision Estado
     {
         get
         {
             var c = _cargado.Value;
-            return new EstadoVision(c.Red is not null, c.Modelo, c.Etiquetas.Count, c.Detalle);
+            return new EstadoVision(c.Sesion is not null, c.Modelo, c.Etiquetas.Count, c.Detalle);
         }
     }
 
     public IReadOnlyList<DeteccionVision> Clasificar(Mat imagenBgr, int topK)
     {
         var c = _cargado.Value;
-        if (c.Red is null) return Array.Empty<DeteccionVision>();
+        if (c.Sesion is null || c.NombreEntrada is null)
+            return Array.Empty<DeteccionVision>();
 
-        // OpenCV aplica la media en el orden de los canales de la imagen (BGR), salvo que swapRB sea true:
-        // entonces espera la media ya en orden RGB. Se arma según corresponda.
-        var media = _opt.IntercambiarRB
-            ? new Scalar(_opt.MediaR, _opt.MediaG, _opt.MediaB)
-            : new Scalar(_opt.MediaB, _opt.MediaG, _opt.MediaR);
+        if (imagenBgr.Empty())
+            throw new InvalidOperationException("La imagen está vacía.");
 
+        var tensor = ATensorRgb01(imagenBgr);
         float[] salida;
         lock (_sync)
         {
-            // Redimensiona (sin recortar) a AnchoEntrada x AltoEntrada, resta la media, escala y reordena BGR -> RGB.
-            using var blob = CvDnn.BlobFromImage(
-                imagenBgr,
-                _opt.Escala,
-                new Size(_opt.AnchoEntrada, _opt.AltoEntrada),
-                media,
-                _opt.IntercambiarRB,
-                false);
-
-            c.Red.SetInput(blob);
-            using var resultado = c.Red.Forward();
-            salida = CopiarAFloat(resultado);
+            var entrada = NamedOnnxValue.CreateFromTensor(c.NombreEntrada, tensor);
+            using var resultados = c.Sesion.Run(new[] { entrada });
+            salida = resultados.First().AsEnumerable<float>().ToArray();
         }
 
         if (salida.Length != c.Etiquetas.Count)
             throw new InvalidOperationException(
-                $"El modelo devolvió {salida.Length} clases pero etiquetas.json define {c.Etiquetas.Count}. " +
-                "Revisa que el orden y la cantidad de etiquetas coincidan con el entrenamiento.");
+                $"El modelo devolvió {salida.Length} clases pero etiquetas.json define {c.Etiquetas.Count}.");
 
         var prob = AProbabilidades(salida);
-
         return Enumerable.Range(0, prob.Length)
             .OrderByDescending(i => prob[i])
             .Take(Math.Max(1, topK))
@@ -89,7 +74,29 @@ public sealed class ClasificadorOnnxOpenCv : IClasificadorImagen, IDisposable
             .ToList();
     }
 
-    // ---------------------------------------------------------------- carga
+    private DenseTensor<float> ATensorRgb01(Mat imagenBgr)
+    {
+        using var rgb = new Mat();
+        Cv2.CvtColor(imagenBgr, rgb, ColorConversionCodes.BGR2RGB);
+        using var chica = new Mat();
+        Cv2.Resize(rgb, chica, new Size(_opt.AnchoEntrada, _opt.AltoEntrada), 0, 0, InterpolationFlags.Area);
+
+        int h = chica.Rows;
+        int w = chica.Cols;
+        var tensor = new DenseTensor<float>(new[] { 1, 3, h, w });
+        var idx = chica.GetGenericIndexer<Vec3b>();
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                Vec3b p = idx[y, x];
+                tensor[0, 0, y, x] = p.Item0 / 255f;
+                tensor[0, 1, y, x] = p.Item1 / 255f;
+                tensor[0, 2, y, x] = p.Item2 / 255f;
+            }
+        }
+        return tensor;
+    }
 
     private Cargado Cargar()
     {
@@ -99,67 +106,47 @@ public sealed class ClasificadorOnnxOpenCv : IClasificadorImagen, IDisposable
 
         if (!File.Exists(rutaModelo))
         {
-            var detalle = $"No se encontró el modelo '{nombreModelo}'. Colócalo en la carpeta ModelosVision (ver su README).";
-            _log.LogWarning("[Vision] {Detalle} Ruta buscada: {Ruta}", detalle, rutaModelo);
-            return new Cargado(null, Array.Empty<EtiquetaVision>(), nombreModelo, detalle);
+            var detalle = $"No se encontró '{nombreModelo}'.";
+            _log.LogWarning("[Vision] {Detalle} Ruta: {Ruta}", detalle, rutaModelo);
+            return new Cargado(null, null, Array.Empty<EtiquetaVision>(), nombreModelo, detalle);
         }
 
         if (!File.Exists(rutaEtiquetas))
         {
-            var detalle = $"No se encontró el archivo de etiquetas '{Path.GetFileName(rutaEtiquetas)}'.";
-            _log.LogWarning("[Vision] {Detalle} Ruta buscada: {Ruta}", detalle, rutaEtiquetas);
-            return new Cargado(null, Array.Empty<EtiquetaVision>(), nombreModelo, detalle);
+            var detalle = $"No se encontró '{Path.GetFileName(rutaEtiquetas)}'.";
+            _log.LogWarning("[Vision] {Detalle} Ruta: {Ruta}", detalle, rutaEtiquetas);
+            return new Cargado(null, null, Array.Empty<EtiquetaVision>(), nombreModelo, detalle);
         }
 
         try
         {
             var etiquetas = CatalogoEtiquetas.Cargar(rutaEtiquetas);
-
-            var red = CvDnn.ReadNetFromOnnx(rutaModelo);
-            if (red.Empty())
+            var opciones = new SessionOptions
             {
-                red.Dispose();
-                throw new InvalidDataException("OpenCV no pudo leer el modelo ONNX (red vacía).");
-            }
+                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_BASIC,
+                IntraOpNumThreads = 2,
+                InterOpNumThreads = 1
+            };
+            var sesion = new InferenceSession(rutaModelo, opciones);
+            var entrada = sesion.InputMetadata.Keys.FirstOrDefault()
+                ?? throw new InvalidDataException("El ONNX no declara entrada.");
 
-            red.SetPreferableBackend(OpenCvSharp.Dnn.Backend.OPENCV);
-            red.SetPreferableTarget(OpenCvSharp.Dnn.Target.CPU);
-
-            _log.LogInformation("[Vision] Modelo '{Modelo}' cargado con {N} clases.", nombreModelo, etiquetas.Count);
-            return new Cargado(red, etiquetas, nombreModelo, null);
+            _log.LogInformation(
+                "[Vision] ONNX Runtime cargó '{Modelo}' ({N} clases, entrada '{Entrada}').",
+                nombreModelo, etiquetas.Count, entrada);
+            return new Cargado(sesion, entrada, etiquetas, nombreModelo, null);
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "[Vision] No se pudo cargar el modelo '{Modelo}'.", nombreModelo);
-            return new Cargado(null, Array.Empty<EtiquetaVision>(), nombreModelo,
-                "El modelo o las etiquetas no se pudieron cargar. Revisa el log del servidor.");
+            _log.LogError(ex, "[Vision] No se pudo cargar '{Modelo}' con ONNX Runtime.", nombreModelo);
+            return new Cargado(null, null, Array.Empty<EtiquetaVision>(), nombreModelo,
+                "No se pudo cargar el modelo. La API sigue activa. " + ex.Message);
         }
     }
 
     private static string ResolverRuta(string ruta) =>
         Path.IsPathRooted(ruta) ? ruta : Path.Combine(AppContext.BaseDirectory, ruta);
 
-    // ---------------------------------------------------------------- salida
-
-    private static float[] CopiarAFloat(Mat m)
-    {
-        // La salida de DNN es float32 de un canal (4 bytes por elemento). Si no, se leería basura.
-        if (m.ElemSize() != sizeof(float))
-            throw new InvalidOperationException(
-                "La salida del modelo no es float32 de un canal. Exporta el ONNX en FP32.");
-
-        var n = checked((int)m.Total());
-        var datos = new float[n];
-
-        // Marshal.Copy requiere memoria contigua. La salida de DNN lo es, pero se asegura.
-        using var contigua = m.IsContinuous() ? null : m.Clone();
-        var origen = contigua ?? m;
-
-        Marshal.Copy(origen.Data, datos, 0, n);
-        return datos;
-    }
-
-    /// <summary>Si el vector ya es una distribución de probabilidad se deja igual; si son logits, softmax estable.</summary>
     private static float[] AProbabilidades(float[] v)
     {
         var enRango = true;
@@ -179,7 +166,6 @@ public sealed class ClasificadorOnnxOpenCv : IClasificadorImagen, IDisposable
             exp[i] = Math.Exp(v[i] - max);
             total += exp[i];
         }
-
         var p = new float[v.Length];
         for (var i = 0; i < v.Length; i++) p[i] = (float)(exp[i] / total);
         return p;
@@ -188,6 +174,6 @@ public sealed class ClasificadorOnnxOpenCv : IClasificadorImagen, IDisposable
     public void Dispose()
     {
         if (_cargado.IsValueCreated)
-            _cargado.Value.Red?.Dispose();
+            _cargado.Value.Sesion?.Dispose();
     }
 }
