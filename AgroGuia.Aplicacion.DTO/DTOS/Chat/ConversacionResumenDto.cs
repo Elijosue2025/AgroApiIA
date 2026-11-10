@@ -9,7 +9,7 @@ namespace AgroGuia.Aplicacion.DTO.DTOS.Chat
     public class ConversacionResumenDto
     {
         public long Id { get; set; }
-        public string Titulo { get; set; }
+        public required string Titulo { get; set; }
         public DateTime FechaActualizacion { get; set; }
         public string? CultivoActual { get; set; }
         public string? UltimoMensajePreview { get; set; } // opcional

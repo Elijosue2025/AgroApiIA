@@ -44,6 +44,7 @@ public sealed class ClasificadorOnnxOpenCv : IClasificadorImagen, IDisposable
         }
     }
 
+    [Obsolete]
     public IReadOnlyList<DeteccionVision> Clasificar(Mat imagenBgr, int topK)
     {
         var c = _cargado.Value;
@@ -74,6 +75,7 @@ public sealed class ClasificadorOnnxOpenCv : IClasificadorImagen, IDisposable
             .ToList();
     }
 
+    [Obsolete]
     private DenseTensor<float> ATensorRgb01(Mat imagenBgr)
     {
         using var rgb = new Mat();

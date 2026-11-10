@@ -22,7 +22,12 @@ namespace AgroGuia.Infraestructura.AccesoDatos.Repositorio
 
         public async Task<T> GetByIdAsync(long id)
         {
-            return await _dbSet.FindAsync(id);
+            // FindAsync puede devolver null, pero la interfaz espera Task<T> (no Task<T?>).
+            // Por lo tanto, lanzamos una excepción si no se encuentra la entidad.
+            var entidad = await _dbSet.FindAsync(id);
+            if (entidad == null)
+                throw new InvalidOperationException($"Entidad de tipo {typeof(T).Name} con id {id} no encontrada.");
+            return entidad;
         }
 
         public async Task AddAsync(T entidad)

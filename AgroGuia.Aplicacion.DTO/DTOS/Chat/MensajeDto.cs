@@ -9,8 +9,8 @@ namespace AgroGuia.Aplicacion.DTO.DTOS.Chat
     public class MensajeDto
     {
         public long Id { get; set; }
-        public string Rol { get; set; }      // user | assistant
-        public string Contenido { get; set; }
+        public required string Rol { get; set; }      // user | assistant
+        public required string Contenido { get; set; }
         public DateTime Fecha { get; set; }
         public int? Tokens { get; set; }
     }
