@@ -132,4 +132,5 @@ public class DiagnosticoController : ControllerBase
         var item = await _diagnosticoServicio.ObtenerIncidenciaMiaAsync(Uid(), id, ct);
         return item is null ? NotFound() : Ok(item);
     }
+    
 }

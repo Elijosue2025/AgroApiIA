@@ -8,8 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OllamaSharp;
-using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
-using AgroGuia.Infraestructura.ServicioExterno.Ollama;
+
 using OllamaSharp.Models;
 using AgroGuia.Infraestructura.ServicioExterno.Models;
 
