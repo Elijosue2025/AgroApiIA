@@ -106,9 +106,25 @@ public sealed class VectorSearchService : IVectorSearchService
 
         bool EsRelevante(int i)
         {
+            var ch = chunks[i];
+
+            if (cos is null)
+                return posKw.TryGetValue(i, out var p0) && p0 < _opt.RangoKeywordRelevante;
+
+            float c = cos[i];
             bool kwTop = posKw.TryGetValue(i, out var p) && p < _opt.RangoKeywordRelevante;
-            if (cos is null) return kwTop;
-            return cos[i] >= _opt.MinScore || (kwTop && cos[i] >= _opt.MinScore * 0.85f);
+
+            float umbral = _opt.MinScore;
+
+            // Otro cultivo (no el de la pregunta y no "General") → un poco más exigente
+            if (cultivoPregunta is not null
+                && !string.Equals(ch.Cultivo, cultivoPregunta, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(ch.Cultivo, "General", StringComparison.OrdinalIgnoreCase))
+            {
+                umbral = _opt.MinScore * 1.10f;
+            }
+
+            return c >= umbral || (kwTop && c >= umbral * 0.90f);
         }
 
         return fusion

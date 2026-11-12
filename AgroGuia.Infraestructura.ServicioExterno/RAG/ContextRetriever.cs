@@ -48,9 +48,13 @@ public sealed class ContextRetriever
 
         foreach (var h in aciertos)
         {
-            if (cubiertos.Contains((h.Archivo, h.Indice))) continue;   // ya incluido por otra expansión
+            if (cubiertos.Contains((h.Archivo, h.Indice))) continue;
 
-            var vecinos = snap.PorArchivo.TryGetValue(h.Archivo, out var doc)
+            // NUEVO: Solo expandir vecinos si el acierto principal es FUERTE (ej. score > 0.55)
+            // Si apenas pasó el umbral, es mejor enviar solo ese chunk para no meter ruido.
+            bool expandirVecinos = h.Score >= 0.55;
+
+            var vecinos = (expandirVecinos && snap.PorArchivo.TryGetValue(h.Archivo, out var doc))
                 ? doc.Where(c => Math.Abs(c.Indice - h.Indice) <= _opt.VecinosContexto && c.Seccion == h.Seccion).ToList()
                 : new List<IndexedChunk>();
 
