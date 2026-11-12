@@ -36,6 +36,7 @@ public class ChatServicioImpl : IChatServicio
         ContextRetriever contextRetriever,
         PromptBuilder promptBuilder,
         IChatCompletionService chat,
+        ICatalogoAgronomico catalogo,                    // ← nuevo
         IConversacionRepositorio conversacionRepositorio,
         ILogger<ChatServicioImpl> log)
     {

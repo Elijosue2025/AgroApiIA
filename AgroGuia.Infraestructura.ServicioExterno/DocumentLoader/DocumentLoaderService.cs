@@ -183,4 +183,104 @@ public class DocumentLoaderService
         await using var fs = File.OpenRead(ruta);
         return Convert.ToHexString(await SHA256.HashDataAsync(fs, ct));
     }
+    /// <summary>
+    /// Lista los PDFs disponibles en la carpeta configurada.
+    /// </summary>
+    public Task<IReadOnlyList<string>> ListarManualesAsync(string carpetaPath)
+    {
+        if (!Directory.Exists(carpetaPath))
+            return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+
+        var archivos = Directory.GetFiles(carpetaPath, "*.pdf")
+            .Select(Path.GetFileName)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .OrderBy(n => n)
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<string>>(archivos!);
+    }
+
+    /// <summary>
+    /// Carga UN solo manual por nombre de archivo.
+    /// </summary>
+    public async Task<(bool Exito, string Mensaje)> CargarManualAsync(
+        string carpetaPath, string nombreArchivo, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(nombreArchivo))
+            return (false, "Debes indicar el nombre del archivo.");
+
+        if (!nombreArchivo.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            nombreArchivo += ".pdf";
+
+        var ruta = Path.Combine(carpetaPath, nombreArchivo);
+        if (!File.Exists(ruta))
+            return (false, $"No se encontró el archivo: {nombreArchivo}");
+
+        var snapshot = await _index.ObtenerAsync(ct);
+        var hashes = snapshot.Chunks.Where(c => c.Hash != null).Select(c => c.Hash!).ToHashSet();
+        var archivos = snapshot.Chunks.Select(c => c.Archivo).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var hash = await HashAsync(ruta, ct);
+
+        if (hashes.Contains(hash))
+            return (false, $"Sin cambios, ya está cargado: {nombreArchivo}");
+
+        if (archivos.Contains(nombreArchivo))
+        {
+            return (false,
+                $"{nombreArchivo} cambió pero su versión anterior sigue activa. " +
+                "Desactívala primero con: UPDATE EmbeddingChunks SET Activo = 0 " +
+                $"WHERE JSON_VALUE(Metadata,'$.archivo') = '{nombreArchivo}'");
+        }
+
+        try
+        {
+            var ok = await ProcesarPdfAsync(ruta, nombreArchivo, hash, ct);
+            if (ok)
+            {
+                _index.Invalidar();
+                return (true, $"Manual cargado correctamente: {nombreArchivo}");
+            }
+            return (false, $"No se pudo procesar (¿PDF escaneado o vacío?): {nombreArchivo}");
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Error cargando manual {A}", nombreArchivo);
+            return (false, $"Error al procesar {nombreArchivo}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Guarda un PDF subido en la carpeta y lo carga.
+    /// </summary>
+    public async Task<(bool Exito, string Mensaje, string? NombreGuardado)> SubirYCargarManualAsync(
+        string carpetaPath, Stream archivoStream, string nombreOriginal, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(nombreOriginal))
+            return (false, "Nombre de archivo inválido.", null);
+
+        var nombreSeguro = Path.GetFileName(nombreOriginal);
+        if (!nombreSeguro.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            return (false, "Solo se permiten archivos PDF.", null);
+
+        Directory.CreateDirectory(carpetaPath);
+        var rutaDestino = Path.Combine(carpetaPath, nombreSeguro);
+
+        // Evitar sobrescribir sin control
+        if (File.Exists(rutaDestino))
+        {
+            var nombreSinExt = Path.GetFileNameWithoutExtension(nombreSeguro);
+            var ext = Path.GetExtension(nombreSeguro);
+            nombreSeguro = $"{nombreSinExt}_{DateTime.UtcNow:yyyyMMddHHmmss}{ext}";
+            rutaDestino = Path.Combine(carpetaPath, nombreSeguro);
+        }
+
+        await using (var fs = File.Create(rutaDestino))
+        {
+            await archivoStream.CopyToAsync(fs, ct);
+        }
+
+        var resultado = await CargarManualAsync(carpetaPath, nombreSeguro, ct);
+        return (resultado.Exito, resultado.Mensaje, nombreSeguro);
+    }
 }

@@ -1,68 +1,113 @@
 using System.Text.RegularExpressions;
+using AgroGuia.Dominio.Modelo.Abstracciones;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
 using AgroGuia.Infraestructura.ServicioExterno.Utilidades;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader;
 
 /// <summary>
-/// MEJORAS sobre los diccionarios con string.Contains:
-///  - Límites de palabra (\b): "papa" ya no coincide con "papaya" ni "biol" con "biología".
-///  - Puntúa por número de coincidencias en vez de devolver el primer match del diccionario
-///    (esa era la causa de que todo apareciera como Quinua / Buenas Prácticas Agrícolas).
-///  - Se usa por CHUNK, con el documento solo como respaldo.
-///  - Insensible a tildes (maíz = maiz).
+/// Lee CatalogoTerminos de BD y lo cachea en memoria.
+/// Singleton: usa IServiceScopeFactory porque el repo es scoped.
 /// </summary>
 public sealed class CatalogoAgronomico : ICatalogoAgronomico
 {
-    private static Regex R(string p) => new(p, RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private readonly IServiceScopeFactory _scopes;
+    private readonly ILogger<CatalogoAgronomico> _log;
+    private readonly SemaphoreSlim _lock = new(1, 1);
 
-    private static readonly (string Nombre, Regex Patron)[] Cultivos =
+    private volatile List<(string Nombre, string Tipo, Regex Patron)>? _terminos;
+
+    public CatalogoAgronomico(IServiceScopeFactory scopes, ILogger<CatalogoAgronomico> log)
     {
-        ("Papa", R(@"\bpapas?\b")),
-        ("Quinua", R(@"\b(quinua|quinoa)s?\b")),
-        ("Maíz", R(@"\bmaiz\b")),
-        ("Fréjol", R(@"\b(frejol|frijol)(es)?\b")),
-        ("Hortalizas", R(@"\bhortalizas?\b")),
-        ("Zanahoria", R(@"\bzanahorias?\b")),
-        ("Cebolla", R(@"\bcebollas?\b")),
-        ("Lechuga", R(@"\blechugas?\b")),
-        ("Brócoli", R(@"\bbrocoli\b")),
-        ("Tomate", R(@"\btomates?\b")),
-        ("Arveja", R(@"\barvejas?\b")),
-        ("Haba", R(@"\bhabas?\b")),
-        ("Trigo", R(@"\btrigo\b")),
-        ("Cebada", R(@"\bcebada\b")),
-        ("Arroz", R(@"\barroz\b")),
-    };
+        _scopes = scopes;
+        _log = log;
+    }
 
-    private static readonly (string Nombre, Regex Patron)[] Temas =
+    public string? DetectarCultivo(string texto, string? titulo = null)
+        => Detectar(texto, titulo, "Cultivo");
+
+    public string? DetectarTema(string texto, string? titulo = null)
+        => Detectar(texto, titulo, "Tema")
+        ?? Detectar(texto, titulo, "Plaga")
+        ?? Detectar(texto, titulo, "Enfermedad")
+        ?? Detectar(texto, titulo, "Mantenimiento");
+
+    public string? DetectarPlagaOEnfermedad(string texto, string? titulo = null)
+        => Detectar(texto, titulo, "Plaga")
+        ?? Detectar(texto, titulo, "Enfermedad");
+
+    /// <summary>Invalida la caché (llamar después de agregar términos nuevos).</summary>
+    public void Invalidar() => _terminos = null;
+
+    private string? Detectar(string texto, string? titulo, string tipo)
     {
-        ("Bioinsumos", R(@"\b(bioinsumos?|biol|bokashi|compost\w*|biofertiliz\w*|microorganismos eficientes)\b")),
-        ("Fertilización", R(@"\b(abon\w*|fertiliz\w*|nutrici\w+|npk)\b")),
-        ("Buenas Prácticas Agrícolas", R(@"\b(bpa|buenas practicas( agricolas)?)\b")),
-        ("Sanidad Vegetal", R(@"\b(plagas?|enfermedad\w*|fungicidas?|insecticidas?|pesticidas?|tizon|gusano\w*|fitosanitari\w*)\b")),
-        ("Riego y Agua", R(@"\b(riego\w*|irrigaci\w+)\b")),
-        ("Cosecha y Postcosecha", R(@"\b(cosecha\w*|postcosecha|poscosecha|almacenamiento)\b")),
-        ("Manejo de Suelos", R(@"\b(suelos?|erosion|labranza)\b")),
-        ("Siembra y Trasplante", R(@"\b(siembra\w*|sembrar|trasplante\w*)\b")),
-        ("Semillas", R(@"\b(semillas?|germinaci\w+)\b")),
-        ("Clima y Altitud", R(@"\b(clima\w*|altitud|heladas?|temperatura\w*|precipitaci\w+)\b")),
-    };
+        var lista = ObtenerTerminos();
+        var candidatos = lista.Where(t => t.Tipo.Equals(tipo, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (candidatos.Count == 0) return null;
 
-    public string? DetectarCultivo(string texto, string? titulo = null) => Mejor(Cultivos, texto, titulo);
-    public string? DetectarTema(string texto, string? titulo = null) => Mejor(Temas, texto, titulo);
-
-    private static string? Mejor((string Nombre, Regex Patron)[] catalogo, string texto, string? titulo)
-    {
         var t = TextoUtil.ParaBusqueda(texto ?? string.Empty);
         var ti = string.IsNullOrWhiteSpace(titulo) ? string.Empty : TextoUtil.ParaBusqueda(titulo);
+
         string? mejor = null;
         int mejorPuntaje = 0;
-        foreach (var (nombre, patron) in catalogo)
+
+        foreach (var (nombre, _, patron) in candidatos)
         {
             int p = patron.Matches(t).Count + 5 * (ti.Length == 0 ? 0 : patron.Matches(ti).Count);
-            if (p > mejorPuntaje) { mejorPuntaje = p; mejor = nombre; }
+            if (p > mejorPuntaje)
+            {
+                mejorPuntaje = p;
+                mejor = nombre;
+            }
         }
+
         return mejor;
+    }
+
+    private List<(string Nombre, string Tipo, Regex Patron)> ObtenerTerminos()
+    {
+        var cached = _terminos;
+        if (cached is not null) return cached;
+
+        _lock.Wait();
+        try
+        {
+            if (_terminos is not null) return _terminos;
+
+            using var scope = _scopes.CreateScope();
+            var repo = scope.ServiceProvider.GetRequiredService<ICatalogoTerminosRepositorio>();
+            var entidades = repo.ObtenerActivosAsync().GetAwaiter().GetResult();
+
+            var lista = new List<(string, string, Regex)>();
+            foreach (var e in entidades)
+            {
+                var partes = new List<string> { e.Nombre };
+                if (!string.IsNullOrWhiteSpace(e.Sinonimos))
+                {
+                    partes.AddRange(e.Sinonimos
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                }
+
+                // Escapar y unir con | para \b(termino1|termino2)\b
+                var pattern = @"\b(" + string.Join("|", partes
+                    .Select(p => Regex.Escape(TextoUtil.ParaBusqueda(p)))
+                    .Where(p => p.Length > 1)) + @")\b";
+
+                if (pattern == @"\b()\b") continue;
+
+                lista.Add((e.Nombre, e.Tipo, new Regex(pattern,
+                    RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)));
+            }
+
+            _log.LogInformation("Catálogo agronómico cargado: {N} términos activos", lista.Count);
+            _terminos = lista;
+            return lista;
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 }
