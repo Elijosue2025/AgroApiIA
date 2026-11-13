@@ -8,21 +8,61 @@ namespace AgroGuia.Dominio.Modelo.Entidades;
 
 public partial class AgroGuiaIA_DBContext : DbContext
 {
+    public AgroGuiaIA_DBContext()
+    {
+    }
+
     public AgroGuiaIA_DBContext(DbContextOptions<AgroGuiaIA_DBContext> options)
         : base(options)
     {
     }
 
+    public virtual DbSet<CatalogoTerminos> CatalogoTerminos { get; set; }
+
     public virtual DbSet<Conversaciones> Conversaciones { get; set; }
 
     public virtual DbSet<EmbeddingChunks> EmbeddingChunks { get; set; }
-    public virtual DbSet<VisionIncidencias> VisionIncidencias { get; set; }
+
     public virtual DbSet<Mensajes> Mensajes { get; set; }
 
     public virtual DbSet<Usuarios> Usuarios { get; set; }
 
+    public virtual DbSet<VisionIncidencias> VisionIncidencias { get; set; }
+
+    //*protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+//#warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
+  //      => optionsBuilder.UseSqlServer("Data Source=DESKTOP-81RJK43;Initial Catalog=AgroGuiaIA_DB;Integrated Security=True;Encrypt=True");
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<CatalogoTerminos>(entity =>
+        {
+            entity.HasIndex(e => new { e.Tipo, e.Activo }, "IX_CatalogoTerminos_Tipo_Activo");
+
+            entity.HasIndex(e => new { e.Tipo, e.Nombre }, "UX_CatalogoTerminos_Tipo_Nombre").IsUnique();
+
+            entity.Property(e => e.Activo)
+                .HasDefaultValue(true)
+                .HasAnnotation("Relational:DefaultConstraintName", "DF_CatalogoTerminos_Activo");
+            entity.Property(e => e.FechaActualizacion).HasPrecision(0);
+            entity.Property(e => e.FechaCreacion)
+                .HasPrecision(0)
+                .HasDefaultValueSql("(sysutcdatetime())")
+                .HasAnnotation("Relational:DefaultConstraintName", "DF_CatalogoTerminos_FechaCreacion");
+            entity.Property(e => e.Nombre)
+                .IsRequired()
+                .HasMaxLength(100);
+            entity.Property(e => e.Notas).HasMaxLength(300);
+            entity.Property(e => e.Origen)
+                .HasMaxLength(50)
+                .HasDefaultValue("Manual")
+                .HasAnnotation("Relational:DefaultConstraintName", "DF_CatalogoTerminos_Origen");
+            entity.Property(e => e.Sinonimos).HasMaxLength(500);
+            entity.Property(e => e.Tipo)
+                .IsRequired()
+                .HasMaxLength(30);
+        });
+
         modelBuilder.Entity<Conversaciones>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("PK__Conversa__3214EC07202609C4");
@@ -30,6 +70,7 @@ public partial class AgroGuiaIA_DBContext : DbContext
             entity.HasIndex(e => e.UsuarioId, "IX_Conversaciones_UsuarioId");
 
             entity.Property(e => e.Activo).HasDefaultValue(true);
+            entity.Property(e => e.CultivoActual).HasMaxLength(100);
             entity.Property(e => e.FechaActualizacion).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.FechaCreacion).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.Titulo)
@@ -63,7 +104,7 @@ public partial class AgroGuiaIA_DBContext : DbContext
                 .HasMaxLength(200)
                 .IsUnicode(false);
             entity.Property(e => e.PalabrasClave)
-                .HasMaxLength(300)
+                .HasMaxLength(500)
                 .IsUnicode(false);
             entity.Property(e => e.Tema)
                 .HasMaxLength(150)
@@ -125,20 +166,45 @@ public partial class AgroGuiaIA_DBContext : DbContext
                 .HasMaxLength(20)
                 .IsUnicode(false);
         });
-        modelBuilder.Entity<VisionIncidencias>(e =>
+
+        modelBuilder.Entity<VisionIncidencias>(entity =>
         {
-            e.ToTable("VisionIncidencias");
-            e.HasKey(x => x.Id);
+            entity.HasIndex(e => e.ConversacionId, "IX_VisionIncidencias_Conversacion").HasFilter("([ConversacionId] IS NOT NULL AND [Activo]=(1))");
 
-            e.Property(x => x.Cultivo).HasMaxLength(64);
-            e.Property(x => x.RutaImagen).HasMaxLength(500);
-            e.Property(x => x.HashImagen).HasMaxLength(64);
-            e.Property(x => x.ClavePredicha).HasMaxLength(128);
-            e.Property(x => x.NombrePredicho).HasMaxLength(256);
-            e.Property(x => x.Estado).HasMaxLength(32).IsRequired();
-            e.Property(x => x.ModeloVersion).HasMaxLength(128);
+            entity.HasIndex(e => new { e.Cultivo, e.Estado }, "IX_VisionIncidencias_Cultivo_Estado").HasFilter("([Activo]=(1))");
 
-            e.HasIndex(x => new { x.UsuarioId, x.FechaCreacion });
+            entity.HasIndex(e => new { e.UsuarioId, e.FechaCreacion }, "IX_VisionIncidencias_Usuario_Fecha")
+                .IsDescending(false, true)
+                .HasFilter("([Activo]=(1))");
+
+            entity.Property(e => e.Activo)
+                .HasDefaultValue(true)
+                .HasAnnotation("Relational:DefaultConstraintName", "DF_VisionIncidencias_Activo");
+            entity.Property(e => e.ClavePredicha).HasMaxLength(128);
+            entity.Property(e => e.Cultivo).HasMaxLength(64);
+            entity.Property(e => e.Estado)
+                .IsRequired()
+                .HasMaxLength(32)
+                .IsUnicode(false);
+            entity.Property(e => e.FechaCreacion)
+                .HasPrecision(3)
+                .HasDefaultValueSql("(sysutcdatetime())")
+                .HasAnnotation("Relational:DefaultConstraintName", "DF_VisionIncidencias_Fecha");
+            entity.Property(e => e.HashImagen)
+                .HasMaxLength(64)
+                .IsUnicode(false);
+            entity.Property(e => e.ModeloVersion).HasMaxLength(128);
+            entity.Property(e => e.NombrePredicho).HasMaxLength(256);
+            entity.Property(e => e.RutaImagen).HasMaxLength(500);
+
+            entity.HasOne(d => d.Conversacion).WithMany(p => p.VisionIncidencias)
+                .HasForeignKey(d => d.ConversacionId)
+                .HasConstraintName("FK_VisionIncidencias_Conversacion");
+
+            entity.HasOne(d => d.Usuario).WithMany(p => p.VisionIncidencias)
+                .HasForeignKey(d => d.UsuarioId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_VisionIncidencias_Usuario");
         });
 
         OnModelCreatingPartial(modelBuilder);

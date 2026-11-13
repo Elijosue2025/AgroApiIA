@@ -100,7 +100,6 @@ builder.Services.AddScoped<IUsuarioRepositorio, UsuarioRepositorioImpl>();
 builder.Services.AddScoped<IConversacionRepositorio, ConversacionRepositorioImpl>();
 builder.Services.AddScoped<IEmbeddingRepositorio, EmbeddingRepositorioImpl>();
 builder.Services.AddScoped<IVisionIncidenciaRepositorio, VisionIncidenciaRepositorioImpl>();
-services.AddScoped<ICatalogoTerminosRepositorio, CatalogoTerminosRepositorioImpl>();
 
 // ==================== SERVICIOS DE APLICACIÓN ====================
 builder.Services.AddScoped<IAuthServicio, AuthServicioImpl>();

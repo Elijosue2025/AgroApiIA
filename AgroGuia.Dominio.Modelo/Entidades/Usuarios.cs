@@ -30,4 +30,6 @@ public partial class Usuarios
     public DateTime? RefreshTokenExpiry { get; set; }
 
     public virtual ICollection<Conversaciones> Conversaciones { get; set; } = new List<Conversaciones>();
+
+    public virtual ICollection<VisionIncidencias> VisionIncidencias { get; set; } = new List<VisionIncidencias>();
 }

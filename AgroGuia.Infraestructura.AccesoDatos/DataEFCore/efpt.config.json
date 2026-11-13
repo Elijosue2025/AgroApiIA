@@ -3,7 +3,7 @@
    "ContextClassName": "AgroGuiaIA_DBContext",
    "ContextNamespace": null,
    "FilterSchemas": false,
-   "IncludeConnectionString": false,
+   "IncludeConnectionString": true,
    "IrregularWords": null,
    "MinimumProductVersion": "2.6.1301",
    "ModelNamespace": null,
@@ -19,6 +19,10 @@
    "T4TemplatePath": null,
    "Tables": [
       {
+         "Name": "[dbo].[CatalogoTerminos]",
+         "ObjectType": 0
+      },
+      {
          "Name": "[dbo].[Conversaciones]",
          "ObjectType": 0
       },
@@ -32,6 +36,10 @@
       },
       {
          "Name": "[dbo].[Usuarios]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[VisionIncidencias]",
          "ObjectType": 0
       }
    ],

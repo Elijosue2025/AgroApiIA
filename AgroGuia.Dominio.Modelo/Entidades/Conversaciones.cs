@@ -19,8 +19,11 @@ public partial class Conversaciones
 
     public bool? Activo { get; set; }
 
+    public string CultivoActual { get; set; }
+
     public virtual ICollection<Mensajes> Mensajes { get; set; } = new List<Mensajes>();
 
     public virtual Usuarios Usuario { get; set; }
-    public string CultivoActual { get; set; }
+
+    public virtual ICollection<VisionIncidencias> VisionIncidencias { get; set; } = new List<VisionIncidencias>();
 }

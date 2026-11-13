@@ -13,7 +13,6 @@ public partial class EmbeddingChunks
 
     public string Contenido { get; set; }
 
-
     public string Fuente { get; set; }
 
     public string Cultivo { get; set; }
@@ -27,5 +26,6 @@ public partial class EmbeddingChunks
     public bool? Activo { get; set; }
 
     public string VectorEmbedding { get; set; }
+
     public string Metadata { get; set; }
 }

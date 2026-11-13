@@ -23,4 +23,8 @@
     <ProjectReference Include="..\AgroGuia.Dominio.Servicio\AgroGuia.Dominio.Servicio.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="DataEFCore\" />
+  </ItemGroup>
+
 </Project>

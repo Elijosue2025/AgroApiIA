@@ -23,6 +23,7 @@ public class ChatServicioImpl : IChatServicio
     private readonly IChatCompletionService _chat;
     private readonly IConversacionRepositorio _conversacionRepositorio;
     private readonly ILogger<ChatServicioImpl> _log;
+    private readonly ICatalogoAgronomico _catalogo;
 
     // Cultivos frecuentes (amplía según tu catálogo)
     private static readonly string[] CultivosConocidos =
