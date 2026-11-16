@@ -4,6 +4,7 @@ using AgroGuia.Dominio.Modelo.Abstracciones;
 using AgroGuia.Dominio.Modelo.Entidades;
 using AgroGuia.Infraestructura.AccesoDatos.Repositorio;
 using AgroGuia.Infraestructura.ServicioExterno.DependencyInjection;
+using AgroGuia.Infraestructura.ServicioExterno.DocumentLoader;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -101,7 +102,6 @@ builder.Services.AddScoped<IConversacionRepositorio, ConversacionRepositorioImpl
 builder.Services.AddScoped<IEmbeddingRepositorio, EmbeddingRepositorioImpl>();
 builder.Services.AddScoped<IVisionIncidenciaRepositorio, VisionIncidenciaRepositorioImpl>();
 builder.Services.AddScoped<ICatalogoTerminosRepositorio, CatalogoTerminosRepositorioImpl>();
-
 // ==================== SERVICIOS DE APLICACIÓN ====================
 builder.Services.AddScoped<IAuthServicio, AuthServicioImpl>();
 builder.Services.AddScoped<IUsuarioServicio, UsuarioServicioImpl>();
@@ -110,6 +110,7 @@ builder.Services.AddScoped<IChatServicio, ChatServicioImpl>();
 builder.Services.AddScoped<IRAGServicio, RAGServicioImpl>();
 builder.Services.AddScoped<IJwtService, JwtServiceImpl>();
 builder.Services.AddScoped<IDiagnosticoServicio, DiagnosticoServicioImpl>();
+builder.Services.AddSingleton<ICatalogoAgronomico, CatalogoAgronomico>();
 
 // ==================== OLLAMA / RAG / VISIÓN (una sola vez) ====================
 builder.Services.AddServicioExterno(builder.Configuration);

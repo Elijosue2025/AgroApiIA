@@ -326,6 +326,12 @@ public class DiagnosticoServicioImpl : IDiagnosticoServicio
         if (principal is null || confianza is null || confianza < _opt.ConfianzaMinima) return "Incierta";
         if (string.Equals(principal.Etiqueta.Clave, "papa_otra_o_incierta", StringComparison.OrdinalIgnoreCase))
             return "Incierta";
+
+        // Margen de confianza: evita falsos positivos cuando la 1ª y 2ª clase están muy cerca
+        var segunda = r.Detecciones.Skip(1).FirstOrDefault();
+        if (segunda is not null && (principal.Confianza - segunda.Confianza) < 0.25)
+            return "Incierta";
+
         return "Identificada";
     }
 

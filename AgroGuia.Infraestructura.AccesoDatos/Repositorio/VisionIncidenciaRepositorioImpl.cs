@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-using AgroGuia.Dominio.Modelo.Abstracciones;
+﻿using AgroGuia.Dominio.Modelo.Abstracciones;
 using AgroGuia.Dominio.Modelo.Entidades;
 using Microsoft.EntityFrameworkCore;
 
@@ -36,6 +30,7 @@ public class VisionIncidenciaRepositorioImpl : IVisionIncidenciaRepositorio
         long usuarioId, int take = 50, CancellationToken ct = default)
     {
         take = take <= 0 ? 50 : Math.Min(take, 200);
+
         return await _ctx.VisionIncidencias.AsNoTracking()
             .Where(x => x.UsuarioId == usuarioId && x.Activo)
             .OrderByDescending(x => x.FechaCreacion)

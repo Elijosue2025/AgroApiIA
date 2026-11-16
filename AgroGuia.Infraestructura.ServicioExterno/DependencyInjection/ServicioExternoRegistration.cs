@@ -8,8 +8,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OllamaSharp;
-
-using OllamaSharp.Models;
 using AgroGuia.Infraestructura.ServicioExterno.Models;
 
 namespace AgroGuia.Infraestructura.ServicioExterno.DependencyInjection;
@@ -26,6 +24,7 @@ public static class ServicioExternoRegistration
         services.Configure<RagOptions>(configuration.GetSection("Rag"));
         services.Configure<ChunkingOptions>(configuration.GetSection("Chunking"));
         services.Configure<DocumentosConfig>(configuration.GetSection("Documentos"));
+        services.Configure<OpenAIConfig>(configuration.GetSection("OpenAI"));
 
         // ---- Ollama: embeddings (HttpClient tipado) ----
         services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>((sp, http) =>
@@ -48,7 +47,6 @@ public static class ServicioExternoRegistration
 
         // ---- Proveedor del chat: "Llm:Provider" = "Ollama" (por defecto) | "OpenAI" ----
         // Los embeddings siguen siendo siempre locales (nomic-embed-text); solo cambia quién redacta la respuesta.
-        IServiceCollection servicesWithOpenAIConfig = services.Configure<OpenAIConfig>(configuration.GetSection("OpenAI"));
         if (string.Equals(configuration["Llm:Provider"], "OpenAI", StringComparison.OrdinalIgnoreCase))
             services.AddScoped<IChatCompletionService, OpenAIChatCompletionService>();
         else
@@ -60,7 +58,6 @@ public static class ServicioExternoRegistration
         services.AddSingleton<IChunker, ParagraphChunker>();
         services.AddSingleton<ICatalogoAgronomico, CatalogoAgronomico>();
         services.AddScoped<DocumentLoaderService>();
-        //services.AddScoped<IOpenAIService, OllamaChatService>();
 
         // ---- RAG ----
         services.AddSingleton<SimilarityService>();

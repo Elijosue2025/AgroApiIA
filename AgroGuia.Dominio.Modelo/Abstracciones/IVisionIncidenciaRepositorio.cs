@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-using AgroGuia.Dominio.Modelo.Entidades;
+﻿using AgroGuia.Dominio.Modelo.Entidades;
 
 namespace AgroGuia.Dominio.Modelo.Abstracciones;
 

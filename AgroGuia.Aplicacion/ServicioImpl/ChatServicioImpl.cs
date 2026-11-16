@@ -15,7 +15,7 @@ namespace AgroGuia.Aplicacion.ServicioImpl;
 
 public class ChatServicioImpl : IChatServicio
 {
-    private const int MaxTurnosHistorial = 8; // 8 mensajes ≈ 4 pares user/assistant
+    private const int MaxTurnosHistorial = 8;
     private const int MaxCharsHistorial = 1800;
 
     private readonly ContextRetriever _contextRetriever;
@@ -25,25 +25,18 @@ public class ChatServicioImpl : IChatServicio
     private readonly ILogger<ChatServicioImpl> _log;
     private readonly ICatalogoAgronomico _catalogo;
 
-    // Cultivos frecuentes (amplía según tu catálogo)
-    private static readonly string[] CultivosConocidos =
-    {
-        "quinua", "quinoa", "papa", "maíz", "maiz", "frejol", "fréjol", "frijol",
-        "trigo", "cebada", "haba", "arveja", "ulluco", "oca", "mashua", "tomate",
-        "cebolla", "ajo", "lenteja", "chocho", "amaranto"
-    };
-
     public ChatServicioImpl(
         ContextRetriever contextRetriever,
         PromptBuilder promptBuilder,
         IChatCompletionService chat,
-        ICatalogoAgronomico catalogo,                    // ← nuevo
+        ICatalogoAgronomico catalogo,
         IConversacionRepositorio conversacionRepositorio,
         ILogger<ChatServicioImpl> log)
     {
         _contextRetriever = contextRetriever;
         _promptBuilder = promptBuilder;
         _chat = chat;
+        _catalogo = catalogo;
         _conversacionRepositorio = conversacionRepositorio;
         _log = log;
     }
@@ -62,7 +55,6 @@ public class ChatServicioImpl : IChatServicio
                 };
             }
 
-            // ----- 0) Historial de ESTA conversación -----
             var previos = await CargarMensajesPreviosAsync(request.ConversacionId);
             var historialTexto = FormatearHistorial(previos);
             var consultaRag = AmpliarConsultaParaRag(request.Consulta, previos);
@@ -71,7 +63,6 @@ public class ChatServicioImpl : IChatServicio
                 "Hilo conv={Id}: historial={N} msgs | ragQuery=\"{Q}\"",
                 request.ConversacionId, previos.Count, consultaRag);
 
-            // ----- 1) RAG con consulta ampliada (mantiene cultivo/tema del hilo) -----
             var reloj = Stopwatch.StartNew();
             var contextos = await _contextRetriever.ObtenerContextoAsync(consultaRag);
             var msContexto = reloj.ElapsedMilliseconds;
@@ -83,7 +74,6 @@ public class ChatServicioImpl : IChatServicio
                 return Ok(sinInfo, 0);
             }
 
-            // ----- 2) Prompt = historial + contexto + pregunta actual -----
             var usados = _promptBuilder.SeleccionarContexto(contextos);
             var basePrompt = _promptBuilder.Construir(request.Consulta.Trim(), usados, historialTexto);
 
@@ -92,7 +82,6 @@ public class ChatServicioImpl : IChatServicio
                 basePrompt.Usuario,
                 NormalizarModo(request.ModoModelo));
 
-            // ----- 3) LLM -----
             reloj.Restart();
             var result = await _chat.GenerarAsync(prompt);
 
@@ -117,7 +106,6 @@ public class ChatServicioImpl : IChatServicio
             if (result.Exito)
                 await GuardarParAsync(request, texto, tokens);
 
-            // Opcional: persistir cultivo del hilo si la entidad/repo lo soportan
             await IntentarActualizarCultivoHiloAsync(request.ConversacionId, request.Consulta, previos);
 
             return Ok(texto, tokens, result.Exito ? null : result.ErrorMensaje);
@@ -152,6 +140,7 @@ public class ChatServicioImpl : IChatServicio
             .TakeLast(MaxTurnosHistorial)
             .ToList();
     }
+
     private static string? FormatearHistorial(IReadOnlyList<Mensajes> previos)
     {
         if (previos.Count == 0) return null;
@@ -170,54 +159,56 @@ public class ChatServicioImpl : IChatServicio
 
         var texto = sb.ToString();
         if (texto.Length > MaxCharsHistorial)
-            texto = texto[^MaxCharsHistorial..]; // cola del hilo (lo más reciente)
+            texto = texto[^MaxCharsHistorial..];
 
         return texto;
     }
 
-    /// <summary>
-    /// Si la pregunta es corta / seguimiento, añade cultivo y pistas del historial
-    /// para que el RAG no busque solo "más métodos".
-    /// </summary>
-    private static string AmpliarConsultaParaRag(string preguntaActual, IReadOnlyList<Mensajes> previos)
+    // -------------------------------------------------------------------------
+    // Ampliación de consulta para RAG (usa el catálogo)
+    // -------------------------------------------------------------------------
+
+    private string AmpliarConsultaParaRag(string preguntaActual, IReadOnlyList<Mensajes> previos)
     {
         var q = preguntaActual.Trim();
         if (previos.Count == 0) return q;
 
-        var cultivoEnPregunta = DetectarCultivo(q);
-        var cultivoHilo = cultivoEnPregunta
-            ?? DetectarCultivoEnMensajes(previos)
-            ?? "";
+        var cultivo = DetectarCultivo(q) ?? DetectarCultivoEnMensajes(previos);
+        var plagaOTema = _catalogo.DetectarPlagaOEnfermedad(q)
+                      ?? _catalogo.DetectarTema(q);
 
-        var esSeguimiento = PareceSeguimiento(q) || cultivoEnPregunta is null;
+        var esSeguimiento = PareceSeguimiento(q) || cultivo is null;
 
-        if (!esSeguimiento && cultivoEnPregunta is not null)
+        if (!esSeguimiento && cultivo is not null && plagaOTema is null)
             return q; // pregunta nueva ya explícita
 
-        // Últimas preguntas del usuario (pistas: trips, jabón, siembra…)
-        var pistas = previos
-            .Where(m => string.Equals(m.Rol, "user", StringComparison.OrdinalIgnoreCase))
-            .Select(m => m.Contenido ?? "")
-            .Reverse()
-            .Take(3)
-            .ToList();
-
         var extra = new StringBuilder(q);
-        if (!string.IsNullOrEmpty(cultivoHilo) &&
-            q.IndexOf(cultivoHilo, StringComparison.OrdinalIgnoreCase) < 0)
+
+        if (!string.IsNullOrEmpty(cultivo) &&
+            q.IndexOf(cultivo, StringComparison.OrdinalIgnoreCase) < 0)
         {
-            extra.Append(' ').Append(cultivoHilo);
+            extra.Append(' ').Append(cultivo);
         }
 
-        // Añade 1–2 frases previas del user si el mensaje actual es muy corto
+        if (!string.IsNullOrEmpty(plagaOTema) &&
+            q.IndexOf(plagaOTema, StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            extra.Append(' ').Append(plagaOTema);
+        }
+
+        // Si es seguimiento corto, añade una pista del historial
         if (q.Length < 80 || PareceSeguimiento(q))
         {
-            foreach (var p in pistas)
+            var pista = previos
+                .Where(m => string.Equals(m.Rol, "user", StringComparison.OrdinalIgnoreCase))
+                .Select(m => m.Contenido ?? "")
+                .Reverse()
+                .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p) &&
+                                     !p.Equals(q, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(pista))
             {
-                if (string.IsNullOrWhiteSpace(p)) continue;
-                if (p.Equals(q, StringComparison.OrdinalIgnoreCase)) continue;
-                extra.Append(' ').Append(p.Length > 120 ? p[..120] : p);
-                break; // una pista basta para no ensuciar el embed
+                extra.Append(' ').Append(pista.Length > 120 ? pista[..120] : pista);
             }
         }
 
@@ -236,28 +227,24 @@ public class ChatServicioImpl : IChatServicio
             || t.Contains("también") || t.Contains("tambien");
     }
 
-    private static string? DetectarCultivo(string texto)
-    {
-        var t = texto.ToLowerInvariant();
-        foreach (var c in CultivosConocidos)
-            if (t.Contains(c)) return c is "quinoa" ? "quinua" : c is "maiz" ? "maíz" : c;
-        return null;
-    }
+    private string? DetectarCultivo(string texto)
+        => _catalogo.DetectarCultivo(texto);
 
-    private static string? DetectarCultivoEnMensajes(IReadOnlyList<Mensajes> msgs)
+    private string? DetectarCultivoEnMensajes(IReadOnlyList<Mensajes> msgs)
     {
         for (int i = msgs.Count - 1; i >= 0; i--)
         {
             if (!string.Equals(msgs[i].Rol, "user", StringComparison.OrdinalIgnoreCase))
                 continue;
-            var c = DetectarCultivo(msgs[i].Contenido ?? "");
+
+            var c = _catalogo.DetectarCultivo(msgs[i].Contenido ?? "");
             if (c is not null) return c;
         }
         return null;
     }
 
     private async Task IntentarActualizarCultivoHiloAsync(
-    long conversacionId, string pregunta, IReadOnlyList<Mensajes> previos)
+        long conversacionId, string pregunta, IReadOnlyList<Mensajes> previos)
     {
         if (conversacionId <= 0) return;
 
@@ -267,29 +254,25 @@ public class ChatServicioImpl : IChatServicio
         var conv = await _conversacionRepositorio.ObtenerPorIdAsync(conversacionId);
         if (conv is null) return;
 
-        // Ya tiene el mismo cultivo → no hace falta guardar
         if (string.Equals(conv.CultivoActual, cultivo, StringComparison.OrdinalIgnoreCase))
             return;
 
         conv.CultivoActual = cultivo;
 
-        // Mejora el título solo si sigue siendo el por defecto
         var tituloActual = (conv.Titulo ?? "").Trim();
         if (string.IsNullOrEmpty(tituloActual) ||
             tituloActual.Equals("Nueva consulta", StringComparison.OrdinalIgnoreCase) ||
             tituloActual.Equals("Nueva Consulta Agronómica", StringComparison.OrdinalIgnoreCase))
         {
-            // Primera letra en mayúscula
             var nombre = char.ToUpper(cultivo[0]) + cultivo[1..];
             conv.Titulo = $"Consulta sobre {nombre}";
         }
 
         await _conversacionRepositorio.ActualizarAsync(conv);
     }
-    
 
     // -------------------------------------------------------------------------
-    // Persistencia / helpers
+    // Helpers
     // -------------------------------------------------------------------------
 
     private static string? NormalizarModo(string? modo)
