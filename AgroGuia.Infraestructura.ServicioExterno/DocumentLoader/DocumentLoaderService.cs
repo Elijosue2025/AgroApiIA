@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Transactions;
 using AgroGuia.Dominio.Modelo.Abstracciones;
@@ -24,7 +24,7 @@ namespace AgroGuia.Infraestructura.ServicioExterno.DocumentLoader;
 /// AJUSTE: los INSERT de un documento van dentro de un TransactionScope (todo o nada). Sin esto, si fallaba el
 /// chunk 40 de 80 quedaban 39 guardados y la siguiente carga veía el hash y daba el documento por cargado.
 /// </summary>
-public class DocumentLoaderService
+public partial class DocumentLoaderService
 {
     public const int VersionEsquema = 2;   // v1 = ingesta antigua (sin prefijos ni orden de lectura)
     private const string Fuente = "Manual Técnico";
@@ -88,11 +88,11 @@ public class DocumentLoaderService
         return cargados;
     }
 
-    private async Task<bool> ProcesarPdfAsync(string ruta, string archivo, string hash, CancellationToken ct)
+    private async Task<bool> ProcesarPdfAsync(string ruta, string archivo, string hash, CancellationToken ct, OpcionesCargaManual? opciones = null)
     {
         var doc = _extractor.Extraer(ruta);
         var bloques = _cleaner.Limpiar(doc);
-        var chunks = _chunker.Dividir(bloques);
+        var chunks = Dividir(bloques, opciones);
 
         if (chunks.Count == 0)
         {
@@ -101,8 +101,10 @@ public class DocumentLoaderService
         }
 
         var textoDoc = string.Join("\n", bloques.Select(b => b.Texto));
-        var cultivoDoc = _catalogo.DetectarCultivo(textoDoc, doc.Titulo) ?? "General";
-        var temaDoc = _catalogo.DetectarTema(textoDoc, doc.Titulo) ?? "General";
+        var cultivoForzado = Texto(opciones?.Cultivo);
+        var temaForzado = Texto(opciones?.Tema);
+        var cultivoDoc = cultivoForzado ?? _catalogo.DetectarCultivo(textoDoc, doc.Titulo) ?? "General";
+        var temaDoc = temaForzado ?? _catalogo.DetectarTema(textoDoc, doc.Titulo) ?? "General";
 
         var tituloLegible = doc.Titulo.Replace('_', ' ').Replace('-', ' ');
         var textosEmbedding = chunks.Select(c =>
@@ -132,8 +134,8 @@ public class DocumentLoaderService
             {
                 ct.ThrowIfCancellationRequested();
                 var c = chunks[i];
-                var cultivo = _catalogo.DetectarCultivo(c.Contenido, c.Seccion) ?? cultivoDoc;
-                var tema = _catalogo.DetectarTema(c.Contenido, c.Seccion) ?? temaDoc;
+                var cultivo = cultivoForzado ?? _catalogo.DetectarCultivo(c.Contenido, c.Seccion) ?? cultivoDoc;
+                var tema = temaForzado ?? _catalogo.DetectarTema(c.Contenido, c.Seccion) ?? temaDoc;
 
                 var entidad = new EmbeddingChunks
                 {
@@ -178,6 +180,29 @@ public class DocumentLoaderService
         return TextoUtil.ParaVarchar(string.Join(",", palabras), 290, cortarEnComa: true);
     }
 
+
+    private static string? Texto(string? valor) =>
+        string.IsNullOrWhiteSpace(valor) ? null : valor.Trim();
+
+    private IReadOnlyList<ChunkPreparado> Dividir(IReadOnlyList<BloqueTexto> bloques, OpcionesCargaManual? opciones)
+    {
+        if (opciones?.MaxChars is not int max)
+            return _chunker.Dividir(bloques);
+
+        var opts = new ChunkingOptions
+        {
+            MaxChars = Math.Clamp(max, 200, 4000),
+            MinChars = Math.Clamp(opciones.MinChars ?? 150, 40, 2000),
+            OverlapParrafos = 0,
+            RatioLetrasMinimo = 0.40,
+            RatioLetrasUnidadMinimo = 0.20
+        };
+        return new ParagraphChunker(
+            Microsoft.Extensions.Options.Options.Create(opts),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ParagraphChunker>.Instance)
+            .Dividir(bloques);
+    }
+
     private static async Task<string> HashAsync(string ruta, CancellationToken ct)
     {
         await using var fs = File.OpenRead(ruta);
@@ -204,7 +229,7 @@ public class DocumentLoaderService
     /// Carga UN solo manual por nombre de archivo.
     /// </summary>
     public async Task<(bool Exito, string Mensaje)> CargarManualAsync(
-        string carpetaPath, string nombreArchivo, CancellationToken ct = default)
+        string carpetaPath, string nombreArchivo, CancellationToken ct = default, OpcionesCargaManual? opciones = null)
     {
         if (string.IsNullOrWhiteSpace(nombreArchivo))
             return (false, "Debes indicar el nombre del archivo.");
@@ -235,7 +260,7 @@ public class DocumentLoaderService
 
         try
         {
-            var ok = await ProcesarPdfAsync(ruta, nombreArchivo, hash, ct);
+            var ok = await ProcesarPdfAsync(ruta, nombreArchivo, hash, ct, opciones);
             if (ok)
             {
                 _index.Invalidar();
@@ -254,7 +279,7 @@ public class DocumentLoaderService
     /// Guarda un PDF subido en la carpeta y lo carga.
     /// </summary>
     public async Task<(bool Exito, string Mensaje, string? NombreGuardado)> SubirYCargarManualAsync(
-        string carpetaPath, Stream archivoStream, string nombreOriginal, CancellationToken ct = default)
+        string carpetaPath, Stream archivoStream, string nombreOriginal, CancellationToken ct = default, OpcionesCargaManual? opciones = null)
     {
         if (string.IsNullOrWhiteSpace(nombreOriginal))
             return (false, "Nombre de archivo inválido.", null);
@@ -280,7 +305,10 @@ public class DocumentLoaderService
             await archivoStream.CopyToAsync(fs, ct);
         }
 
-        var resultado = await CargarManualAsync(carpetaPath, nombreSeguro, ct);
+        if (opciones?.SoloGuardar == true)
+            return (true, $"PDF guardado en la carpeta, sin vectorizar: {nombreSeguro}", nombreSeguro);
+
+        var resultado = await CargarManualAsync(carpetaPath, nombreSeguro, ct, opciones);
         return (resultado.Exito, resultado.Mensaje, nombreSeguro);
     }
 }
