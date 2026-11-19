@@ -1,4 +1,4 @@
-﻿using AgroGuia.Aplicacion.Servicio;
+using AgroGuia.Aplicacion.Servicio;
 using AgroGuia.Aplicacion.ServicioImpl;
 using AgroGuia.Dominio.Modelo.Abstracciones;
 using AgroGuia.Dominio.Modelo.Entidades;
@@ -7,6 +7,8 @@ using AgroGuia.Infraestructura.ServicioExterno.DependencyInjection;
 using AgroGuia.Infraestructura.ServicioExterno.DocumentLoader;
 using AgroGuia.Infraestructura.ServicioExterno.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -14,6 +16,17 @@ using PdfSharp.Charting;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Misma idea que copiar el PDF a la carpeta: el límite de Kestrel (30 MB) ya no corta manuales grandes.
+const long MaxPdfBytes = 524_288_000;
+builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = MaxPdfBytes);
+builder.Services.Configure<KestrelServerOptions>(k => k.Limits.MaxRequestBodySize = MaxPdfBytes);
+builder.Services.Configure<FormOptions>(o =>
+{
+    o.MultipartBodyLengthLimit = MaxPdfBytes;
+    o.ValueLengthLimit = int.MaxValue;
+    o.MultipartHeadersLengthLimit = int.MaxValue;
+});
 
 // ==================== SERVICIOS ====================
 builder.Services.AddControllers();
@@ -35,7 +48,6 @@ var connectionString = builder.Configuration.GetConnectionString("ConexionDBAgro
 builder.Services.AddDbContext<AgroGuiaIA_DBContext>(
     options => options.UseSqlServer(connectionString, sql =>
     {
-        // Timeout alto: la 1ª carga del índice lee todos los vectores
         sql.CommandTimeout(180);
     }),
     ServiceLifetime.Scoped);
@@ -96,13 +108,11 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
-// ==================== REPOSITORIOS ====================
 builder.Services.AddScoped<IUsuarioRepositorio, UsuarioRepositorioImpl>();
 builder.Services.AddScoped<IConversacionRepositorio, ConversacionRepositorioImpl>();
 builder.Services.AddScoped<IEmbeddingRepositorio, EmbeddingRepositorioImpl>();
 builder.Services.AddScoped<IVisionIncidenciaRepositorio, VisionIncidenciaRepositorioImpl>();
 builder.Services.AddScoped<ICatalogoTerminosRepositorio, CatalogoTerminosRepositorioImpl>();
-// ==================== SERVICIOS DE APLICACIÓN ====================
 builder.Services.AddScoped<IAuthServicio, AuthServicioImpl>();
 builder.Services.AddScoped<IUsuarioServicio, UsuarioServicioImpl>();
 builder.Services.AddScoped<IConversacionServicio, ConversacionServicioImpl>();
@@ -112,7 +122,6 @@ builder.Services.AddScoped<IJwtService, JwtServiceImpl>();
 builder.Services.AddScoped<IDiagnosticoServicio, DiagnosticoServicioImpl>();
 builder.Services.AddSingleton<ICatalogoAgronomico, CatalogoAgronomico>();
 
-// ==================== OLLAMA / RAG / VISIÓN (una sola vez) ====================
 builder.Services.AddServicioExterno(builder.Configuration);
 
 var app = builder.Build();
@@ -123,7 +132,6 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// En desarrollo evita forzar HTTPS (el front usa http://localhost:5261)
 if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
@@ -134,7 +142,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// Precarga RAG (no tumba el host)
 _ = Task.Run(async () =>
 {
     try
@@ -151,7 +158,6 @@ _ = Task.Run(async () =>
     }
 });
 
-// Precarga visión (no tumba el host)
 _ = Task.Run(() =>
 {
     try

@@ -1,5 +1,4 @@
-﻿using AgroGuia.Infraestructura.ServicioExterno.DocumentLoader;
-
+using AgroGuia.Infraestructura.ServicioExterno.DocumentLoader;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -9,6 +8,7 @@ namespace AgroGuia.API.Controllers
     [Route("api/documentos")]
     public class DocumentosController : ControllerBase
     {
+        private const long MaxPdfBytes = 524_288_000;
         private readonly DocumentLoaderService _loader;
         private readonly DocumentosConfig _config;
 
@@ -20,9 +20,6 @@ namespace AgroGuia.API.Controllers
             _config = options.Value;
         }
 
-        /// <summary>
-        /// Lista los PDFs disponibles en la carpeta de manuales.
-        /// </summary>
         [HttpGet("listar")]
         public async Task<IActionResult> ListarManuales()
         {
@@ -38,9 +35,6 @@ namespace AgroGuia.API.Controllers
             });
         }
 
-        /// <summary>
-        /// Carga TODOS los manuales de la carpeta (comportamiento anterior).
-        /// </summary>
         [HttpPost("cargar")]
         public async Task<IActionResult> CargarTodos(CancellationToken ct)
         {
@@ -63,10 +57,6 @@ namespace AgroGuia.API.Controllers
             }
         }
 
-        /// <summary>
-        /// Carga UN manual concreto por nombre de archivo.
-        /// Ejemplo: POST /api/documentos/cargar-uno  body: { "nombreArchivo": "3_Manual-BPA-Quinua.pdf" }
-        /// </summary>
         [HttpPost("cargar-uno")]
         public async Task<IActionResult> CargarUno([FromBody] CargarManualRequest request, CancellationToken ct)
         {
@@ -77,7 +67,7 @@ namespace AgroGuia.API.Controllers
                 return BadRequest(new { error = "Debes indicar NombreArchivo." });
 
             var (exito, mensaje) = await _loader.CargarManualAsync(
-                _config.RutaManuales, request.NombreArchivo, ct);
+                _config.RutaManuales, request.NombreArchivo, ct, request.AOpciones());
 
             if (!exito)
                 return BadRequest(new { error = mensaje });
@@ -86,12 +76,20 @@ namespace AgroGuia.API.Controllers
         }
 
         /// <summary>
-        /// Sube un PDF nuevo a la carpeta y lo carga al RAG.
-        /// form-data: archivo = (el PDF)
+        /// form-data: archivo, y opcionales cultivo, tema, maxChars, minChars, soloGuardar.
+        /// Hasta 500 MB, el mismo orden que copiar el PDF a la carpeta local.
         /// </summary>
         [HttpPost("subir")]
-        [RequestSizeLimit(50_000_000)] // 50 MB
-        public async Task<IActionResult> SubirManual(IFormFile archivo, CancellationToken ct)
+        [RequestSizeLimit(MaxPdfBytes)]
+        [RequestFormLimits(MultipartBodyLengthLimit = MaxPdfBytes)]
+        public async Task<IActionResult> SubirManual(
+            IFormFile archivo,
+            [FromForm] string? cultivo,
+            [FromForm] string? tema,
+            [FromForm] int? maxChars,
+            [FromForm] int? minChars,
+            [FromForm] bool soloGuardar = false,
+            CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(_config.RutaManuales))
                 return BadRequest(new { error = "La ruta de manuales no está configurada." });
@@ -102,23 +100,40 @@ namespace AgroGuia.API.Controllers
             if (!archivo.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
                 return BadRequest(new { error = "Solo se permiten archivos PDF." });
 
+            var opciones = new OpcionesCargaManual
+            {
+                Cultivo = cultivo,
+                Tema = tema,
+                MaxChars = maxChars,
+                MinChars = minChars,
+                SoloGuardar = soloGuardar
+            };
+
             await using var stream = archivo.OpenReadStream();
             var (exito, mensaje, nombreGuardado) = await _loader.SubirYCargarManualAsync(
-                _config.RutaManuales, stream, archivo.FileName, ct);
+                _config.RutaManuales, stream, archivo.FileName, ct, opciones);
 
             if (!exito)
                 return BadRequest(new { error = mensaje, archivo = nombreGuardado });
 
-            return Ok(new
-            {
-                mensaje,
-                archivoGuardado = nombreGuardado
-            });
+            return Ok(new { mensaje, archivoGuardado = nombreGuardado });
         }
     }
 
     public class CargarManualRequest
     {
         public string NombreArchivo { get; set; } = string.Empty;
+        public string? Cultivo { get; set; }
+        public string? Tema { get; set; }
+        public int? MaxChars { get; set; }
+        public int? MinChars { get; set; }
+
+        public OpcionesCargaManual AOpciones() => new()
+        {
+            Cultivo = Cultivo,
+            Tema = Tema,
+            MaxChars = MaxChars,
+            MinChars = MinChars
+        };
     }
 }
